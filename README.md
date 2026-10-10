@@ -62,3 +62,15 @@ All configuration is environment variables in `.env.local` (see
 - **Local cluster** — the tools run `kubectl` against `KUBE_CONTEXT`.
 
 Built with TypeScript, Next.js, the Vercel AI SDK and the local LM Studio server.
+
+
+# Git commmands:
+
+git add .
+git commit -m "Your comments"
+git push -u origin main
+
+
+# Start command:
+cd phase2-chat-agent
+npm run dev
