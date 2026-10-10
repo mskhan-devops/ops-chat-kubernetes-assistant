@@ -17,7 +17,7 @@ import {
 } from "ai";
 
 export function Chat() {
-  const { messages, sendMessage, addToolOutput, stop, status, setMessages } = useChat({
+  const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
     // once the human answers a propose tool call, re-send so the agent picks up
     // the decision and continues the turn
@@ -31,11 +31,21 @@ export function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // While a turn is streaming, show a spinner for the model itself unless a
+  // tool line is already showing its own in-progress spinner.
+  const lastParts = messages[messages.length - 1]?.parts ?? [];
+  const lastWorkingTool = lastParts.some(
+    (p) =>
+      isToolUIPart(p) &&
+      (p.state === "input-streaming" || p.state === "input-available"),
+  );
+  const showThinking = status === "streaming" && !lastWorkingTool;
+
   return (
     <div className="chat">
       <div className="messages">
-        {messages.map((m) => (
-          <div key={m.id} className={`msg ${m.role}`}>
+        {messages.map((m, mi) => (
+          <div key={`${m.id}-${mi}`} className={`msg ${m.role}`}>
             <span className="role">{m.role === "user" ? "🧑" : "🤖"}</span>
             <div className="parts">
               {m.parts.map((part, i) => {
@@ -54,7 +64,9 @@ export function Chat() {
                     return (
                       <div key={i} className="approval pending" aria-busy="true">
                         <strong>⏳ Approval needed</strong>
-                        <div style={{ marginTop: 4, opacity: 0.6 }}>Preparing details, please wait...</div>
+                        <div style={{ marginTop: 4, opacity: 0.6 }}>
+                          <span className="spinner" aria-hidden="true" /> Preparing details, please wait...
+                        </div>
                         <div>
                           <button disabled>✅ Approve</button>
                           <button disabled>❌ Deny</button>
@@ -117,18 +129,25 @@ export function Chat() {
                 // Show tool activity (read-only wire + the executed mutations)
                 if (isToolUIPart(part)) {
                   const name = getToolName(part);
+                  const isMut = name === "deletePod" || name === "setMemoryLimit";
+                  const inProgress =
+                    part.state === "input-streaming" || part.state === "input-available";
                   return (
                     <p
                       key={i}
-                      className={
-                        name === "deletePod" || name === "setMemoryLimit"
-                          ? "tool mut"
-                          : "tool"
-                      }
+                      className={`tool${isMut ? " mut" : ""}`}
                     >
-                      🔧 {name} · {part.state}
-                      {part.state === "output-error" && (
-                        <span> — {(part as { errorText?: string }).errorText}</span>
+                      {inProgress ? (
+                        <>
+                          <span className="spinner" aria-hidden="true" /> {name} · running…
+                        </>
+                      ) : (
+                        <>
+                          {part.state === "output-error" ? "❌" : "🔧"} {name} · {part.state}
+                          {part.state === "output-error" && (
+                            <span> — {(part as { errorText?: string }).errorText}</span>
+                          )}
+                        </>
                       )}
                     </p>
                   );
@@ -138,7 +157,26 @@ export function Chat() {
             </div>
           </div>
         ))}
+        {showThinking && (
+          <div className="msg assistant">
+            <span className="role">🤖</span>
+            <div className="parts">
+              <p className="tool working">
+                <span className="spinner" aria-hidden="true" /> thinking…
+              </p>
+            </div>
+          </div>
+        )}
       </div>
+
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>⚠ {error.message || "The request failed."}</span>
+          <button type="button" onClick={() => clearError()}>
+            ✕
+          </button>
+        </div>
+      )}
 
       <form
         onSubmit={(e) => {

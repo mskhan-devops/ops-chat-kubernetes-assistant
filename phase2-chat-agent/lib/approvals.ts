@@ -7,7 +7,7 @@
 // This module rebuilds the human's decisions from the UI message history (the
 // propose* tool calls resolved via addToolOutput) and hands the tools a checker
 // that throws unless there is an *approved, not-yet-consumed* proposal for the
-// exact same target. A denial for a target always wins over any older approval.
+// same target. A denial for a target always wins over any older approval.
 
 import type { UIMessage } from "ai";
 
@@ -19,6 +19,19 @@ const PROPOSAL_FOR: Record<string, string> = {
   rolloutRestart: "proposeRolloutRestart",
   applyManifest: "proposeApply",
   deleteResource: "proposeDeleteResource",
+};
+
+// Identity fields used to bind a mutation to the proposal it came from. We
+// deliberately do NOT compare free-form payloads (e.g. a full YAML manifest):
+// the model re-emits them when it calls the mutation and they never match
+// byte-for-byte. An empty list means "bind to the latest proposal of this type".
+const MATCH_KEYS: Record<string, string[]> = {
+  deletePod: ["pod", "namespace"],
+  setMemoryLimit: ["workload", "kind", "namespace", "memory"],
+  scaleWorkload: ["workload", "kind", "namespace", "replicas"],
+  rolloutRestart: ["workload", "kind", "namespace"],
+  applyManifest: [],
+  deleteResource: ["kind", "name", "namespace"],
 };
 
 type Proposal = {
@@ -34,15 +47,16 @@ function normalize(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-// every argument of the mutation must match the proposal input (reason excluded
-// because only the proposal carries it)
-function targetsMatch(
-  proposalInput: Record<string, unknown>,
-  args: Record<string, unknown>,
-): boolean {
-  return Object.entries(args).every(([key, value]) => {
-    if (value === undefined) return true;
-    return normalize(proposalInput[key]) === normalize(value);
+// A missing value on either side is treated as a wildcard so that omitted/`null`
+// fields (e.g. namespace defaulting) never cause a false rejection.
+function targetsMatch(mutation: string, proposalInput: Record<string, unknown>, args: Record<string, unknown>): boolean {
+  const keys = MATCH_KEYS[mutation] ?? [];
+  return keys.every((key) => {
+    const proposed = proposalInput[key];
+    const actual = args[key];
+    if (proposed === undefined || proposed === null) return true;
+    if (actual === undefined || actual === null) return true;
+    return normalize(proposed) === normalize(actual);
   });
 }
 
@@ -72,11 +86,12 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
     }
   }
 
-  const findLatest = (toolName: string, args: Record<string, unknown>) => {
+  const findLatest = (mutation: string, args: Record<string, unknown>) => {
+    const proposalName = PROPOSAL_FOR[mutation];
     for (let i = proposals.length - 1; i >= 0; i--) {
       const proposal = proposals[i];
-      if (proposal.toolName !== toolName) continue;
-      if (!targetsMatch(proposal.input, args)) continue;
+      if (proposal.toolName !== proposalName) continue;
+      if (!targetsMatch(mutation, proposal.input, args)) continue;
       return proposal;
     }
     return undefined;
@@ -87,16 +102,11 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
   // turn without a fresh proposal.
   for (const message of messages) {
     for (const part of message.parts ?? []) {
-      const p = part as {
-        type?: string;
-        state?: string;
-        input?: unknown;
-      };
+      const p = part as { type?: string; state?: string; input?: unknown };
       if (!p.type?.startsWith("tool-")) continue;
       const mutation = p.type.slice("tool-".length);
-      const proposalName = PROPOSAL_FOR[mutation];
-      if (!proposalName || p.state !== "output-available") continue;
-      const spent = findLatest(proposalName, (p.input ?? {}) as Record<string, unknown>);
+      if (!PROPOSAL_FOR[mutation] || p.state !== "output-available") continue;
+      const spent = findLatest(mutation, (p.input ?? {}) as Record<string, unknown>);
       if (spent) spent.consumed = true;
     }
   }
@@ -107,10 +117,10 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
       throw new Error(`Action blocked: ${mutation} is not an approved mutation.`);
     }
 
-    const proposal = findLatest(proposalName, args);
+    const proposal = findLatest(mutation, args);
     if (!proposal) {
       throw new Error(
-        `Action blocked: ${mutation} requires an approved ${proposalName} for this exact target first.`,
+        `Action blocked: ${mutation} requires an approved ${proposalName} first. Ask the user to approve a proposal before running it.`,
       );
     }
     if (proposal.consumed) {

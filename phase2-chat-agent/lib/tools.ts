@@ -12,7 +12,15 @@ const KUBE_CONTEXT = process.env.KUBE_CONTEXT || "";
 
 function kubectl(args: string[]): Promise<string> {
   const full = KUBE_CONTEXT ? ["--context", KUBE_CONTEXT, ...args] : args;
-  return exec(KUBECTL_BIN, full, { timeout: 300_000 }).then((r) => r.stdout);
+  return exec(KUBECTL_BIN, full, { timeout: 300_000 }).then(
+    (r) => r.stdout,
+    (err: { stderr?: string | Buffer; stdout?: string | Buffer; message?: string }) => {
+      const detail = String(err?.stderr || err?.stdout || err?.message || err)
+        .toString()
+        .trim();
+      throw new Error(`kubectl ${full.join(" ")} failed: ${detail || "unknown error"}`);
+    },
+  );
 }
 
 // Mock data for demo mode

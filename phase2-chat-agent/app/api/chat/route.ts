@@ -19,6 +19,20 @@ import { createApprovalChecker } from "@/lib/approvals";
 
 export const maxDuration = 300;
 
+const LM_STUDIO_BASE_URL = process.env.LM_STUDIO_BASE_URL ?? "http://localhost:1234/v1";
+
+// This handler is used for BOTH genuine stream/model errors and ordinary tool
+// execution errors (see tool-error in the AI SDK). Rewriting everything to
+// "is LM Studio running?" hid real kubectl failures, so only connection-style
+// errors get the friendly hint; anything else surfaces its real message.
+function describeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  if (/fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EHOSTUNREACH|socket hang up|other side closed|terminated|network|connect/i.test(message)) {
+    return `Cannot reach the model server at ${LM_STUDIO_BASE_URL} — is LM Studio running and the model loaded? (${message})`;
+  }
+  return message || "Something went wrong.";
+}
+
 export async function POST(req: Request) {
   const { messages }: { messages: UIMessage[] } = await req.json();
 
@@ -41,7 +55,7 @@ export async function POST(req: Request) {
   return result.toUIMessageStreamResponse({
     onError: (error: unknown) => {
       console.error("[ops-chat] UI stream error:", error);
-      return "Something went wrong talking to LM Studio. Is it running and is the model loaded?";
+      return describeError(error);
     },
   });
 }
