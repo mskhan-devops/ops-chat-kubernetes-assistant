@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { ApprovalChecker } from "./approvals";
 
 const exec = promisify(execFile);
 
@@ -34,7 +35,8 @@ demo              Active   1h`;
 
 const nsSchema = z.object({ namespace: z.string().optional().describe("Namespace name. Omit to use current/default context behavior.") });
 
-export const clusterTools = {
+export function createClusterTools(requireApproval: ApprovalChecker) {
+  return {
   // Read-only tools
   getNamespaces: tool({
     description: "List all namespaces in the cluster.",
@@ -284,6 +286,7 @@ export const clusterTools = {
     description: "Delete a pod (requires approved proposeDeletion).",
     inputSchema: z.object({ pod: z.string(), namespace: z.string() }),
     execute: async ({ pod, namespace }) => {
+      requireApproval("deletePod", { pod, namespace });
       if (!useRealCluster) return `pod ${pod} deleted (mock)`;
       return kubectl(["delete", "pod", pod, "-n", namespace, "--wait=false"]);
     },
@@ -298,6 +301,7 @@ export const clusterTools = {
       memory: z.string(),
     }),
     execute: async ({ workload, kind, namespace, memory }) => {
+      requireApproval("setMemoryLimit", { workload, kind, namespace, memory });
       if (!useRealCluster) return `${workload} memory set to ${memory} (mock)`;
       if (kind === "deployment" || kind === "statefulset" || kind === "daemonset") {
         const patch = JSON.stringify({
@@ -330,6 +334,7 @@ export const clusterTools = {
       replicas: z.number().int().positive(),
     }),
     execute: async ({ workload, kind, namespace, replicas }) => {
+      requireApproval("scaleWorkload", { workload, kind, namespace, replicas });
       if (!useRealCluster) return `scaled ${workload} to ${replicas} (mock)`;
       return kubectl(["scale", `${kind}/${workload}`, `--replicas=${replicas}`, "-n", namespace]);
     },
@@ -344,6 +349,7 @@ export const clusterTools = {
       reason: z.string().optional(),
     }),
     execute: async ({ workload, kind, namespace }) => {
+      requireApproval("rolloutRestart", { workload, kind, namespace });
       if (!useRealCluster) return `restarted ${workload} (mock)`;
       return kubectl(["rollout", "restart", `${kind}/${workload}`, "-n", namespace]);
     },
@@ -353,6 +359,7 @@ export const clusterTools = {
     description: "Apply manifest from string (requires approved proposeApply).",
     inputSchema: z.object({ manifest: z.string(), namespace: z.string().optional() }),
     execute: async ({ manifest, namespace }) => {
+      requireApproval("applyManifest", { manifest, namespace });
       if (!useRealCluster) return "applied (mock)";
       const tmp = `/tmp/opencode-manifest-${Date.now()}.yaml`;
       const fs = await import("fs/promises");
@@ -371,6 +378,7 @@ export const clusterTools = {
       namespace: z.string().optional(),
     }),
     execute: async ({ kind, name, namespace }) => {
+      requireApproval("deleteResource", { kind, name, namespace });
       if (!useRealCluster) return `deleted ${kind}/${name} (mock)`;
       const args = ["delete", kind, name];
       if (namespace) args.push("-n", namespace);
@@ -411,6 +419,7 @@ export const clusterTools = {
       return `Initiated port-forward ${resource}:${remotePort} -> localhost:${localPort}`;
     },
   }),
-};
+  };
+}
 
 export const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 30);

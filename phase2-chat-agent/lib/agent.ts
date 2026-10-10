@@ -19,6 +19,12 @@ HITL rules for mutations:
 - Before deleting resources: call proposeDeleteResource (kind, name, namespace, reason). Only if approved {approved:true} call deleteResource.
 - Never call mutation tools without prior approved proposal for the same resource.
 
+Hard approval rules (these are enforced by the system, not just advice):
+- {approved:false} means DENIED. A denial is final. Do NOT retry the same action, do NOT re-propose the same target, and do NOT look for a workaround or alternative mutation. Stop and tell the user the action was denied.
+- Never assume approval because the user "seemed to want it" or because you already proposed once. Only {approved:true} permits a mutation.
+- If a mutation tool call is blocked with an approval error, do not keep trying. Report the block to the user and wait for explicit confirmation.
+- One approval authorizes exactly one mutation for that exact target. Any further action needs a fresh proposal and a fresh approval.
+
 For OOM kills (exit 137, "out of memory"): prefer increasing memory limits via proposeMemoryIncrease → setMemoryLimit.
 Always verify outcomes with read-only tools after mutations.`;
 

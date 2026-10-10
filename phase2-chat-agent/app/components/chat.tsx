@@ -46,7 +46,23 @@ export function Chat() {
                 if (part.type.startsWith("tool-propose") && isToolUIPart(part)) {
                   const toolName = getToolName(part) as any;
                   const toolInput = part.input as any;
-                  if (part.state === "input-available" || part.state === "input-streaming") {
+                  // The model streams the tool input token-by-token. Until it is
+                  // fully available (state "input-available") the summary would be
+                  // partial, so keep the card inert — no leaking half-written text,
+                  // no approving incomplete arguments.
+                  if (part.state === "input-streaming") {
+                    return (
+                      <div key={i} className="approval pending" aria-busy="true">
+                        <strong>⏳ Approval needed</strong>
+                        <div style={{ marginTop: 4, opacity: 0.6 }}>Preparing details, please wait...</div>
+                        <div>
+                          <button disabled>✅ Approve</button>
+                          <button disabled>❌ Deny</button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (part.state === "input-available") {
                     const renderSummary = () => {
                       if (toolName === "proposeDeletion") return <>delete pod <code>{toolInput?.pod}</code> in <code>{toolInput?.namespace}</code></>;
                       if (toolName === "proposeMemoryIncrease") return <>raise memory of <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.memory}</code></>;
