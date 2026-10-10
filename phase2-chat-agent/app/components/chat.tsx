@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import {
   DefaultChatTransport,
@@ -17,7 +17,7 @@ import {
 } from "ai";
 
 export function Chat() {
-  const { messages, sendMessage, addToolOutput, stop, status } = useChat({
+  const { messages, sendMessage, addToolOutput, stop, status, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
     // once the human answers a propose tool call, re-send so the agent picks up
     // the decision and continues the turn
@@ -25,6 +25,11 @@ export function Chat() {
     onError: (error) => console.error("[ops-chat] useChat error:", error),
   });
   const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   return (
     <div className="chat">
@@ -38,34 +43,24 @@ export function Chat() {
 
                 // HITL approval card. The agent called a no-execute propose tool
                 // and is paused waiting for us.
-                if (
-                  part.type === "tool-proposeDeletion" ||
-                  part.type === "tool-proposeMemoryIncrease"
-                ) {
-                  const toolName = part.type.replace("tool-", "") as
-                    | "proposeDeletion"
-                    | "proposeMemoryIncrease";
-                  const toolInput = part.input as {
-                    pod?: string;
-                    workload?: string;
-                    memory?: string;
-                    reason?: string;
-                  };
-                  if (part.state === "input-available") {
+                if (part.type.startsWith("tool-propose") && isToolUIPart(part)) {
+                  const toolName = getToolName(part) as any;
+                  const toolInput = part.input as any;
+                  if (part.state === "input-available" || part.state === "input-streaming") {
+                    const renderSummary = () => {
+                      if (toolName === "proposeDeletion") return <>delete pod <code>{toolInput?.pod}</code> in <code>{toolInput?.namespace}</code></>;
+                      if (toolName === "proposeMemoryIncrease") return <>raise memory of <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.memory}</code></>;
+                      if (toolName === "proposeScale") return <>scale <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.replicas}</code> replicas</>;
+                      if (toolName === "proposeRolloutRestart") return <>restart rollout <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code></>;
+                      if (toolName === "proposeApply") return <>apply manifest in <code>{toolInput?.namespace || "default"}</code></>;
+                      if (toolName === "proposeDeleteResource") return <>delete <code>{toolInput?.kind}</code>/<code>{toolInput?.name}</code> {toolInput?.namespace ? <>in <code>{toolInput?.namespace}</code></> : null}</>;
+                      return <>approve {toolName}</>;
+                    };
                     return (
                       <div key={i} className="approval">
-                        <strong>⚠ Approval needed:</strong>{" "}
-                        {toolName === "proposeDeletion" ? (
-                          <>
-                            delete pod <code>{toolInput.pod}</code>
-                          </>
-                        ) : (
-                          <>
-                            raise memory limit of <code>{toolInput.workload}</code> to{" "}
-                            <code>{toolInput.memory}</code>
-                          </>
-                        )}
-                        <em> — {toolInput.reason}</em>
+                        <strong>⚠ Approval needed</strong>
+                        <div style={{ marginTop: 4 }}>{renderSummary()}</div>
+                        {toolInput?.reason && <em> — {toolInput.reason}</em>}
                         <div>
                           <button
                             onClick={() =>
@@ -93,7 +88,6 @@ export function Chat() {
                       </div>
                     );
                   }
-                  // once answered, show the decision instead of the buttons
                   const approved =
                     part.state === "output-available" &&
                     (part.output as { approved?: boolean })?.approved;
@@ -152,7 +146,11 @@ export function Chat() {
             ⏹ Stop
           </button>
         )}
+        <button type="button" onClick={() => setMessages([])}>
+          🗑️ Clear
+        </button>
       </form>
+      <div ref={messagesEndRef} />
     </div>
   );
 }
