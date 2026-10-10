@@ -1,0 +1,20 @@
+# secrets & local state
+.env
+.env.local
+.env.*.local
+**/.trigger/
+**/node_modules/
+**/.next/
+**/out/
+
+# confidential sponsor material — never publish
+brief/
+
+# editor / OS
+.idea/
+*.iml
+.DS_Store
+
+# local tooling / build artifacts
+.claude/launch.json
+*.tsbuildinfo

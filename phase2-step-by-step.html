@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 2 · Step-by-step build on Trigger.dev</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#64748b; --bg:#f8fafc;
+    --browser:#6366f1; --server:#2563eb; --trigger:#16a34a; --llm:#f59e0b;
+    --hitl:#7c3aed; --crash:#dc2626; --ret:#0ea5e9; --aws:#232f3e; --awsorange:#ED7100;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(1100px 520px at 85% -10%, #ecfdf5 0%, transparent 60%),
+      radial-gradient(900px 480px at -5% 115%, #eef2ff 0%, transparent 55%),
+      var(--bg);
+    padding:26px 18px 40px}
+  .wrap{max-width:1500px;margin:0 auto}
+  header{text-align:center;margin-bottom:10px}
+  .kicker{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;font-weight:700;
+    letter-spacing:.14em;text-transform:uppercase;color:#fff;background:var(--trigger);
+    padding:5px 13px;border-radius:999px;box-shadow:0 8px 20px -8px var(--trigger)}
+  h1{font-size:29px;margin:12px 0 4px;font-weight:800;letter-spacing:-.02em}
+  h1 .grad{background:linear-gradient(90deg,var(--browser),var(--trigger));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);font-size:14px;margin:0}
+  svg{width:100%;height:auto;display:block;margin-top:4px}
+
+  .stepper{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px}
+  .stepper button{font:inherit;font-weight:800;font-size:15px;border:none;border-radius:999px;
+    padding:8px 18px;cursor:pointer;background:var(--trigger);color:#fff;box-shadow:0 6px 14px -6px var(--trigger)}
+  .stepper button:disabled{opacity:.35;cursor:default}
+  #stepLabel{font-size:14.5px;font-weight:800;min-width:340px;text-align:center}
+  #stepLabel small{display:block;font-weight:600;color:var(--muted);font-size:11.5px;margin-top:2px}
+  .hint{text-align:center;color:var(--muted);font-size:11px;margin-top:6px}
+
+  [data-step]{transition:opacity .55s ease}
+  [data-step].off{opacity:0;pointer-events:none}
+  [data-step].fresh{animation:fadeIn .9s ease}
+  @keyframes fadeIn{from{opacity:0}}
+  #legend{transition:opacity .55s ease}
+  #legend.off{opacity:0}
+
+  .box rect{fill:#fff;rx:14;filter:drop-shadow(0 10px 18px rgba(15,23,42,.12));stroke-width:2}
+  .box .t{font-size:15px;font-weight:800;fill:var(--ink);text-anchor:middle}
+  .box .s{font-size:11px;fill:var(--muted);text-anchor:middle}
+  .box .f{font-size:10.5px;font-weight:600;fill:#475569;font-family:ui-monospace,Menlo,monospace;text-anchor:middle}
+  .box .hs{font-size:10.5px;font-weight:800;fill:#b45309;text-anchor:middle}
+  .b-ui rect{stroke:var(--browser)} .b-next rect{stroke:#0f172a}
+  .b-trigger rect{stroke:var(--trigger)} .b-hitl rect{stroke:var(--hitl)}
+  .b-llm rect{stroke:var(--llm)} .b-aws rect{stroke:var(--awsorange)}
+
+  .zone{fill:#ffffff;opacity:.55;stroke-width:1.5;stroke-dasharray:2 5;rx:20}
+  .z-ui{stroke:var(--browser)} .z-next{stroke:var(--server)}
+  .z-trigger{stroke:var(--trigger)} .z-aws{stroke:var(--aws)}
+  .zlabel{font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+  .zl-ui{fill:var(--browser)} .zl-next{fill:var(--server)} .zl-trigger{fill:var(--trigger)} .zl-aws{fill:var(--aws)}
+  .znote{font-size:10px;font-weight:600;fill:var(--muted)}
+  .controls{font-size:11.5px;font-weight:800;fill:var(--trigger);text-anchor:middle}
+
+  .wire{fill:none;stroke-width:2.6;stroke-linecap:round;stroke-dasharray:8 8;animation:march 1s linear infinite}
+  .thin{stroke-width:1.8;stroke-dasharray:5 6}
+  @keyframes march{to{stroke-dashoffset:-16}}
+  .w-ui{stroke:var(--browser)} .w-next{stroke:var(--server)} .w-trigger{stroke:var(--trigger)}
+  .w-llm{stroke:var(--llm)} .w-hitl{stroke:var(--hitl)} .w-crash{stroke:var(--crash)} .w-ret{stroke:var(--ret)}
+  .pkt{filter:drop-shadow(0 0 4px currentColor)}
+  .p-ui{fill:var(--browser);color:var(--browser)} .p-next{fill:var(--server);color:var(--server)}
+  .p-trigger{fill:var(--trigger);color:var(--trigger)} .p-llm{fill:var(--llm);color:var(--llm)}
+  .p-hitl{fill:var(--hitl);color:var(--hitl)} .p-crash{fill:var(--crash);color:var(--crash)}
+  .p-ret{fill:var(--ret);color:var(--ret)}
+
+  .lbl{font-size:11px;font-weight:700;fill:#334155;paint-order:stroke;stroke:#fff;stroke-width:3.4px;
+    stroke-linejoin:round;text-anchor:middle}
+  .sm{font-size:10px}
+  .loop{font-size:11px;font-weight:800;fill:var(--llm);text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.4px}
+  .crashlbl{font-size:10px;font-weight:800;fill:var(--crash);text-anchor:middle;paint-order:stroke;stroke:#fff;stroke-width:3.4px}
+  .mut{fill:var(--crash)}
+
+  .legend{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:8px}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700;border-radius:999px;padding:6px 13px}
+  .pill.ok{background:#d1fae5;color:#065f46}
+  .pill.ctl{background:#ede9fe;color:#5b21b6}
+  .pill.warm{background:#fef3c7;color:#92400e}
+  .pill.link{background:#e2e8f0;color:#334155}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="kicker">Phase 2 · The AI agent — sponsored by Trigger.dev</span>
+    <h1>What We Build on <span class="grad">Trigger.dev</span> — step by step</h1>
+    <p class="sub">The chat agent assembled one piece at a time — ending with its single controlled doorway into AWS.</p>
+  </header>
+
+  <svg viewBox="0 0 1500 810" role="img" aria-label="Phase 2 step-by-step Trigger.dev architecture">
+    <defs>
+      <marker id="ah" markerWidth="10" markerHeight="10" refX="6.5" refY="3" orient="auto">
+        <path d="M0,0 L7,3 L0,6 Z" fill="#94a3b8"/>
+      </marker>
+      <clipPath id="rlogo"><rect x="820" y="238" width="40" height="40" rx="9"/></clipPath>
+    </defs>
+
+    <!-- STEP 1 — Chat UI -->
+    <g data-step="1">
+      <rect class="zone z-ui" x="24" y="150" width="230" height="330"></rect>
+      <text class="zlabel zl-ui" x="40" y="178">💻 Frontend</text>
+      <g class="box b-ui">
+        <rect x="44" y="200" width="190" height="180"></rect>
+        <image href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9Ii0xMS41IC0xMC4yMzE3NCAyMyAyMC40NjM0OCI+CiAgPHRpdGxlPlJlYWN0IExvZ288L3RpdGxlPgogIDxjaXJjbGUgY3g9IjAiIGN5PSIwIiByPSIyLjA1IiBmaWxsPSIjNjFkYWZiIi8+CiAgPGcgc3Ryb2tlPSIjNjFkYWZiIiBzdHJva2Utd2lkdGg9IjEiIGZpbGw9Im5vbmUiPgogICAgPGVsbGlwc2Ugcng9IjExIiByeT0iNC4yIi8+CiAgICA8ZWxsaXBzZSByeD0iMTEiIHJ5PSI0LjIiIHRyYW5zZm9ybT0icm90YXRlKDYwKSIvPgogICAgPGVsbGlwc2Ugcng9IjExIiByeT0iNC4yIiB0cmFuc2Zvcm09InJvdGF0ZSgxMjApIi8+CiAgPC9nPgo8L3N2Zz4K" x="121" y="216" width="36" height="32"/>
+        <text class="t" x="139" y="284">🧑 Chat UI</text>
+        <text class="s" x="139" y="306">React · useChat (AI SDK)</text>
+        <text class="f" x="139" y="330">approve tools from chat</text>
+      </g>
+    </g>
+
+    <!-- STEP 2 — Next.js transport -->
+    <g data-step="2">
+      <rect class="zone z-next" x="280" y="150" width="250" height="330"></rect>
+      <text class="zlabel zl-next" x="296" y="178">🖥 Backend</text>
+      <g class="box b-next">
+        <rect x="300" y="200" width="210" height="180"></rect>
+        <image href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzk0IiBoZWlnaHQ9IjgwIiB2aWV3Qm94PSIwIDAgMzk0IDgwIiBmaWxsPSJub25lIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgo8cGF0aCBkPSJNMjYxLjkxOSAwLjAzMzA3MjJIMzMwLjU0N1YxMi43SDMwMy4zMjNWNzkuMzM5SDI4OS43MVYxMi43SDI2MS45MTlWMC4wMzMwNzIyWiIgZmlsbD0iYmxhY2siLz4KPHBhdGggZD0iTTE0OS4wNTIgMC4wMzMwNzIyVjEyLjdIOTQuMDQyMVYzMy4wNzcySDEzOC4yODFWNDUuNzQ0MUg5NC4wNDIxVjY2LjY3MjFIMTQ5LjA1MlY3OS4zMzlIODAuNDNWMTIuN0g4MC40MjQzVjAuMDMzMDcyMkgxNDkuMDUyWiIgZmlsbD0iYmxhY2siLz4KPHBhdGggZD0iTTE4My4zMiAwLjA2NjE0ODZIMTY1LjUwNkwyMjkuMzEyIDc5LjM3MjFIMjQ3LjE3OEwyMTUuMjcxIDM5Ljc0NjRMMjQ3LjEyNyAwLjEyNjY1NEwyMjkuMzEyIDAuMTU0MTg0TDIwNi4zNTIgMjguNjY5N0wxODMuMzIgMC4wNjYxNDg2WiIgZmlsbD0iYmxhY2siLz4KPHBhdGggZD0iTTIwMS42IDU2LjcxNDhMMTkyLjY3OSA0NS42MjI5TDE2NS40NTUgNzkuNDMyNkgxODMuMzJMMjAxLjYgNTYuNzE0OFoiIGZpbGw9ImJsYWNrIi8+CjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNODAuOTA3IDc5LjMzOUwxNy4wMTUxIDBIMFY3OS4zMDU5SDEzLjYxMjFWMTYuOTUxNkw2My44MDY3IDc5LjMzOUg4MC45MDdaIiBmaWxsPSJibGFjayIvPgo8cGF0aCBkPSJNMzMzLjYwNyA3OC44NTQ2QzMzMi42MSA3OC44NTQ2IDMzMS43NjIgNzguNTA5MyAzMzEuMDUyIDc3LjgxODZDMzMwLjM0MiA3Ny4xMjc5IDMyOS45OTEgNzYuMjkxNyAzMzAgNzUuMzAxMUMzMjkuOTkxIDc0LjMzNzcgMzMwLjM0MiA3My41MTA2IDMzMS4wNTIgNzIuODE5OUMzMzEuNzYyIDcyLjEyOTIgMzMyLjYxIDcxLjc4MzggMzMzLjYwNyA3MS43ODM4QzMzNC41NjYgNzEuNzgzOCAzMzUuNDA1IDcyLjEyOTIgMzM2LjExNSA3Mi44MTk5QzMzNi44MzUgNzMuNTEwNiAzMzcuMTk0IDc0LjMzNzcgMzM3LjIwNCA3NS4zMDExQzMzNy4xOTQgNzUuOTU1NCAzMzcuMDI4IDc2LjU1NTIgMzM2LjY5NiA3Ny4wOTE0QzMzNi4zNTUgNzcuNjM2OCAzMzUuOTIyIDc4LjA2NCAzMzUuMzc3IDc4LjM3M0MzMzQuODQyIDc4LjY5MTEgMzM0LjI1MiA3OC44NTQ2IDMzMy42MDcgNzguODU0NloiIGZpbGw9ImJsYWNrIi8+CjxwYXRoIGQ9Ik0zNTYuODQgNDUuNDQ1M0gzNjIuODcyVjY4LjY4NDZDMzYyLjg2MyA3MC44MjA0IDM2Mi40MDEgNzIuNjQ3MiAzNjEuNDk4IDc0LjE4MzJDMzYwLjU4NSA3NS43MTkxIDM1OS4zMjEgNzYuODkxNCAzNTcuNjk4IDc3LjcxODVDMzU2LjA4NCA3OC41MzY0IDM1NC4xOTMgNzguOTU0NiAzNTIuMDQ0IDc4Ljk1NDZDMzUwLjA3OSA3OC45NTQ2IDM0OC4zMTggNzguNjAwMSAzNDYuNzUgNzcuOTA5NEMzNDUuMTgyIDc3LjIxODcgMzQzLjkzNyA3Ni4xODI2IDM0My4wMjQgNzQuODE5M0MzNDIuMTAxIDczLjQ1NiAzNDEuNjQ5IDcxLjc1NjUgMzQxLjY0OSA2OS43MjA3SDM0Ny42OTFDMzQ3LjcgNzAuNjExNCAzNDcuOTAzIDcxLjM4MzggMzQ4LjI5IDcyLjAyOTFDMzQ4LjY3NyA3Mi42NzQ0IDM0OS4yMTIgNzMuMTY1MSAzNDkuODk1IDczLjUxMDVDMzUwLjU4NiA3My44NTU5IDM1MS4zOCA3NC4wMjg2IDM1Mi4yNzQgNzQuMDI4NkMzNTMuMjQzIDc0LjAyODYgMzU0LjA3MyA3My44Mjg2IDM1NC43NDYgNzMuNDE5NkMzNTUuNDE5IDczLjAxOTcgMzU1LjkzNiA3Mi40MTk5IDM1Ni4yOTYgNzEuNjIwMUMzNTYuNjQ2IDcwLjgyOTUgMzU2LjgzMSA2OS44NDc5IDM1Ni44NCA2OC42ODQ2VjQ1LjQ0NTNaIiBmaWxsPSJibGFjayIvPgo8cGF0aCBkPSJNMzg3LjY5MSA1NC41MzM4QzM4Ny41NDQgNTMuMTI1MSAzODYuODk4IDUyLjAyNTQgMzg1Ljc3MyA1MS4yNDM4QzM4NC42MzggNTAuNDUzMSAzODMuMTcyIDUwLjA2MjMgMzgxLjM3MyA1MC4wNjIzQzM4MC4xMSA1MC4wNjIzIDM3OS4wMjIgNTAuMjUzMiAzNzguMTE4IDUwLjYyNThDMzc3LjIxNCA1MS4wMDc1IDM3Ni41MTMgNTEuNTE2NCAzNzYuMDMzIDUyLjE2MTdDMzc1LjU1NCA1Mi44MDcgMzc1LjMxNCA1My41NDMyIDM3NS4yOTUgNTQuMzcwM0MzNzUuMjk1IDU1LjA2MSAzNzUuNDYxIDU1LjY2MDggMzc1Ljc4NCA1Ni4xNjA3QzM3Ni4xMDcgNTYuNjY5NiAzNzYuNTQgNTcuMDk2OCAzNzcuMTAzIDU3LjQ0MjJDMzc3LjY1NiA1Ny43OTY2IDM3OC4yNzQgNTguMDg3NCAzNzguOTQ4IDU4LjMyMzdDMzc5LjYzIDU4LjU2IDM4MC4zMTMgNTguNzYgMzgwLjk5NSA1OC45MjM2TDM4NC4xNCA1OS42OTYxQzM4NS40MDQgNTkuOTg2OSAzODYuNjMxIDYwLjM3NzggMzg3LjgwMiA2MC44Nzc2QzM4OC45NzMgNjEuMzY4NCAzOTAuMDM0IDYxLjk5NTUgMzkwLjk2NSA2Mi43NDk4QzM5MS44OTcgNjMuNTA0MiAzOTIuNjM1IDY0LjQxMyAzOTMuMTc5IDY1LjQ3NjRDMzkzLjcyMyA2Ni41Mzk3IDM5NCA2Ny43ODQ4IDM5NCA2OS4yMjA4QzM5NCA3MS4xNTY2IDM5My41MDIgNzIuODU2MiAzOTIuNDk2IDc0LjMyODVDMzkxLjQ5MSA3NS43OTE3IDM5MC4wNDMgNzYuOTM2OSAzODguMTQzIDc3Ljc2NEMzODYuMjUyIDc4LjU4MiAzODMuOTY1IDc5IDM4MS4yNzIgNzlDMzc4LjY3MSA3OSAzNzYuNDAyIDc4LjYwMDIgMzc0LjQ5MyA3Ny44MDA0QzM3Mi41NzUgNzcuMDA5NyAzNzEuMDggNzUuODQ2MyAzNzAuMDAxIDc0LjMxOTRDMzY4LjkyMiA3Mi43OTI2IDM2OC4zNDEgNzAuOTI5NCAzNjguMjU4IDY4LjczOTFIMzc0LjIzNUMzNzQuMzE4IDY5Ljg4NDIgMzc0LjY4NyA3MC44Mzg2IDM3NS4zMTQgNzEuNjExMUMzNzUuOTUgNzIuMzc0NSAzNzYuNzggNzIuOTM4IDM3Ny43OTUgNzMuMzE5N0MzNzguODE5IDczLjY5MjMgMzc5Ljk2MiA3My44ODMyIDM4MS4yMjYgNzMuODgzMkMzODIuNTQ1IDczLjg4MzIgMzgzLjcwNyA3My42ODMyIDM4NC43MTIgNzMuMjkyNEMzODUuNzA4IDcyLjkwMTYgMzg2LjQ5MiA3Mi4zNTY0IDM4Ny4wNTUgNzEuNjQ3NUMzODcuNjI3IDcwLjk0NzYgMzg3LjkxMyA3MC4xMjA2IDM4Ny45MjIgNjkuMTc1NEMzODcuOTEzIDY4LjMxMiAzODcuNjU0IDY3LjU5MzkgMzg3LjE1NiA2Ny4wMzA0QzM4Ni42NDkgNjYuNDY3IDM4NS45NDggNjUuOTk0NCAzODUuMDUzIDY1LjYxMjdDMzg0LjE1IDY1LjIzMSAzODMuMDk4IDY0Ljg4NTYgMzgxLjg5OSA2NC41ODU3TDM3OC4wODEgNjMuNjIyM0MzNzUuMzIzIDYyLjkyMjUgMzczLjEzNyA2MS44NTkyIDM3MS41NDEgNjAuNDMyM0MzNjkuOTM3IDU5LjAwNTQgMzY5LjE0MyA1Ny4xMTUgMzY5LjE0MyA1NC43NDI5QzM2OS4xNDMgNTIuNzk4IDM2OS42NzggNTEuMDg5NCAzNzAuNzU4IDQ5LjYyNjFDMzcxLjgyNyA0OC4xNjI5IDM3My4yOTQgNDcuMDI2OCAzNzUuMTQ4IDQ2LjIxNzlDMzc3LjAxMSA0NS40IDM3OS4xMTQgNDUgMzgxLjQ1NiA0NUMzODMuODM2IDQ1IDM4NS45MiA0NS40IDM4Ny43MTkgNDYuMjE3OUMzODkuNTE3IDQ3LjAyNjggMzkwLjkyOSA0OC4xNTM4IDM5MS45NTIgNDkuNTg5N0MzOTIuOTc2IDUxLjAyNTcgMzkzLjUxMSA1Mi42NzA3IDM5My41MzkgNTQuNTMzOEgzODcuNjkxWiIgZmlsbD0iYmxhY2siLz4KPC9zdmc+Cg==" x="355" y="214" width="100" height="28"/>
+        <text class="t" x="405" y="276">chat-web · Next.js</text>
+        <text class="s" x="405" y="298">custom transport · /api/chat</text>
+        <text class="f" x="405" y="322">app/api/chat/route.ts</text>
+        <text class="hs" x="405" y="344">mints token · starts session</text>
+      </g>
+      <path id="w1" class="wire w-ui" d="M234,270 H300" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="267" y="258">new message</text>
+    </g>
+
+    <!-- STEP 3 — chat.agent durable task -->
+    <g data-step="3">
+      <rect class="zone z-trigger" x="560" y="150" width="560" height="560"></rect>
+      <text class="zlabel zl-trigger" x="580" y="178">⚡ Trigger.dev Cloud</text>
+      <text class="znote" x="580" y="194">managed — open source, self-hostable</text>
+      <g class="box b-trigger">
+        <rect x="590" y="225" width="500" height="190"></rect>
+        <image href="data:image/jpeg;base64,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" x="820" y="238" width="40" height="40" clip-path="url(#rlogo)"/>
+        <text class="t" x="840" y="302">⚡ chat.agent task</text>
+        <text class="s" x="840" y="324">durable session — wakes on messages, sleeps idle</text>
+        <text class="s" x="840" y="341">server-side history + workspace state</text>
+        <text class="f" x="840" y="364">tools: kubectl · cloudwatch · redis-cli</text>
+        <text class="f" x="840" y="384">trigger/chat-agent.ts</text>
+      </g>
+      <path id="w2" class="wire w-next" d="M510,270 C540,270 560,274 590,278" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="549" y="260">tasks.trigger()</text>
+      <path id="wCrash" class="wire w-crash" d="M1040,225 C1080,205 1088,255 1048,248" marker-end="url(#ah)"/>
+      <text class="crashlbl" x="988" y="192">💥 crash · redeploy · OOM</text>
+      <text class="crashlbl" x="988" y="206">→ resumes with full state</text>
+    </g>
+
+    <!-- STEP 4 — LLM loop -->
+    <g data-step="4">
+      <g class="box b-llm">
+        <rect x="640" y="40" width="300" height="70"></rect>
+        <text class="t" x="790" y="70">🧠 LLM Provider</text>
+        <text class="s" x="790" y="92">OpenAI / Anthropic — via streamText (AI SDK)</text>
+      </g>
+      <path id="w3a" class="wire w-llm" d="M760,225 C745,185 735,150 725,110" marker-end="url(#ah)"/>
+      <path id="w3b" class="wire w-llm" d="M855,110 C848,150 840,187 832,225" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="656" y="138">prompt + full history</text>
+      <text class="lbl sm" x="922" y="170">tokens + tool calls</text>
+      <text class="loop" x="795" y="152">↻ every turn</text>
+    </g>
+
+    <!-- STEP 5 — HITL -->
+    <g data-step="5">
+      <g class="box b-hitl">
+        <rect x="590" y="460" width="500" height="130"></rect>
+        <text class="t" x="840" y="496">🙋 Human approval (HITL)</text>
+        <text class="s" x="840" y="518">risky tool paused — waits for ✅ in chat</text>
+        <text class="f" x="840" y="542">e.g. kubectl delete pod payments-xyz</text>
+      </g>
+      <path id="w4a" class="wire w-hitl" d="M760,415 V460" marker-end="url(#ah)"/>
+      <path id="w4b" class="wire w-hitl" d="M920,460 V417" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="760" y="442">🛑 pause</text>
+      <text class="lbl sm" x="920" y="442">✅ resume</text>
+      <path id="w7a" class="wire thin w-hitl" d="M940,590 C860,730 300,760 150,600 C125,565 132,455 139,385" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="560" y="742">approval card shows in chat</text>
+      <path id="w7b" class="wire thin w-hitl" d="M200,385 C240,600 800,760 950,565" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="780" y="704">✅ approve</text>
+      <text class="controls" x="840" y="646">built-in controls: ⏹ stop · 🎛 steer mid-stream · 🌿 branch sessions · 🤝 sub-agents</text>
+    </g>
+
+    <!-- STEP 6 — realtime stream -->
+    <g data-step="6">
+      <path id="w8" class="wire w-ret" d="M590,350 C450,415 320,415 236,350" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="412" y="438">Trigger Realtime — token stream</text>
+    </g>
+
+    <!-- STEP 7 — AWS doorway -->
+    <g data-step="7">
+      <rect class="zone z-aws" x="1150" y="230" width="330" height="330"></rect>
+      <text class="zlabel zl-aws" x="1166" y="258">☁ AWS — Phase 1</text>
+      <g class="box b-aws">
+        <rect x="1175" y="280" width="280" height="240"></rect>
+        <image href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB3aWR0aD0iODBweCIgaGVpZ2h0PSI4MHB4IiB2aWV3Qm94PSIwIDAgODAgODAiIHZlcnNpb249IjEuMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayI+CiAgICA8IS0tIEdlbmVyYXRvcjogU2tldGNoIDY0ICg5MzUzNykgLSBodHRwczovL3NrZXRjaC5jb20gLS0+CiAgICA8dGl0bGU+SWNvbi1BcmNoaXRlY3R1cmUvNjQvQXJjaF9BbWF6b24tRWxhc3RpYy1Db250YWluZXItS3ViZXJuZXRlc182NDwvdGl0bGU+CiAgICA8ZGVzYz5DcmVhdGVkIHdpdGggU2tldGNoLjwvZGVzYz4KICAgIDxkZWZzPgogICAgICAgIDxsaW5lYXJHcmFkaWVudCB4MT0iMCUiIHkxPSIxMDAlIiB4Mj0iMTAwJSIgeTI9IjAlIiBpZD0ibGluZWFyR3JhZGllbnQtMSI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNDODUxMUIiIG9mZnNldD0iMCUiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iI0ZGOTkwMCIgb2Zmc2V0PSIxMDAlIj48L3N0b3A+CiAgICAgICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDwvZGVmcz4KICAgIDxnIGlkPSJJY29uLUFyY2hpdGVjdHVyZS82NC9BcmNoX0FtYXpvbi1FbGFzdGljLUNvbnRhaW5lci1LdWJlcm5ldGVzXzY0IiBzdHJva2U9Im5vbmUiIHN0cm9rZS13aWR0aD0iMSIgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj4KICAgICAgICA8ZyBpZD0iSWNvbi1BcmNoaXRlY3R1cmUtQkcvNjQvQ29udGFpbmVycyIgZmlsbD0idXJsKCNsaW5lYXJHcmFkaWVudC0xKSI+CiAgICAgICAgICAgIDxyZWN0IGlkPSJSZWN0YW5nbGUiIHg9IjAiIHk9IjAiIHdpZHRoPSI4MCIgaGVpZ2h0PSI4MCI+PC9yZWN0PgogICAgICAgIDwvZz4KICAgICAgICA8cGF0aCBkPSJNNDYuODQyLDMyLjE5OTAxNjggTDQwLjAxMyw0MC4xMjAwMTMyIEw0Ny40NDEsNDguNzg0MDA5MiBMNDQuNjY5LDQ4Ljc4NDAwOTIgTDM4LDQxLjAwMDAxNjkgTDM4LDQ5LjAwMDAxNjkgTDM2LDQ5LjAwMDAxNjkgTDM2LDMyLjAwMDAxNjkgTDM4LDMyLjAwMDAxNjkgTDM4LDM5LjAwMDAxNjkgTDQ0LjE4MSwzMi4xOTkwMTY4IEw0Ni44NDIsMzIuMTk5MDE2OCBaIE02NCw0OC4yMzQwMDk1IEw1Niw0My40MzMwMTE3IEw1NiwzMi4wMDAwMTY5IEM1NiwzMS42NDQwMTcxIDU1LjgxMiwzMS4zMTUwMTcyIDU1LjUwNCwzMS4xMzYwMTczIEw0NCwyNC40MjYwMjA0IEw0NCwxNC43NTIwMjQ4IEw2NCwyNi41NzEwMTk0IEw2NCw0OC4yMzQwMDk1IFogTTY1LjUwOSwyNS4xMzkwMiBMNDMuNTA5LDEyLjEzOTAyNiBDNDMuMTk5LDExLjk1NjAyNjEgNDIuODE4LDExLjk1NDAyNjEgNDIuNTA0LDEyLjEzMTAyNiBDNDIuMTkzLDEyLjMwOTAyNTkgNDIsMTIuNjQxMDI1NyA0MiwxMy4wMDAwMjU2IEw0MiwyNS4wMDAwMjAxIEM0MiwyNS4zNTUwMTk5IDQyLjE4OSwyNS42ODQwMTk4IDQyLjQ5NiwyNS44NjQwMTk3IEw1NCwzMi41NzQwMTY2IEw1NCw0NC4wMDAwMTE0IEM1NCw0NC4zNTEwMTEzIDU0LjE4NSw0NC42NzcwMTExIDU0LjQ4Niw0NC44NTcwMTEgTDY0LjQ4Niw1MC44NTcwMDgzIEM2NC42NDQsNTAuOTUyMDA4MiA2NC44MjIsNTEgNjUsNTEgQzY1LjE3LDUxIDY1LjM0LDUwLjk1NzAwODIgNjUuNDkzLDUwLjg3MDAwODMgQzY1LjgwNyw1MC42OTMwMDg0IDY2LDUwLjM2MDAwODUgNjYsNTAgTDY2LDI2LjAwMDAxOTYgQzY2LDI1LjY0NjAxOTggNjUuODE0LDI1LjMxOTAyIDY1LjUwOSwyNS4xMzkwMiBMNjUuNTA5LDI1LjEzOTAyIFogTTQwLjQ0NSw2Ni44NjMwMDEgTDE3LDU0LjM5OTAwNjcgTDE3LDI2LjU3MTAxOTQgTDM3LDE0Ljc1MjAyNDggTDM3LDI0LjQ1MTAyMDQgTDI2LjQ2MywzMS4xNTYwMTczIEMyNi4xNzUsMzEuMzQwMDE3MiAyNiwzMS42NTgwMTcxIDI2LDMyLjAwMDAxNjkgTDI2LDQ5LjAwMDAwOTEgQzI2LDQ5LjM3MzAwOSAyNi4yMDgsNDkuNzE1MDA4OCAyNi41MzgsNDkuODg3MDA4NyBMMzkuOTkxLDU2Ljg4NzAwNTUgQzQwLjI4LDU3LjAzNzAwNTUgNDAuNjI0LDU3LjAzODAwNTUgNDAuOTEyLDU2Ljg4ODAwNTUgTDUzLjk2NCw1MC4xNDQwMDg2IEw2MS45OTYsNTQuOTY0MDA2NCBMNDAuNDQ1LDY2Ljg2MzAwMSBaIE02NC41MTUsNTQuMTQyMDA2OCBMNTQuNTE1LDQ4LjE0MjAwOTUgQzU0LjIxNyw0Ny45NjQwMDk2IDUzLjg0OSw0Ny45NTIwMDk2IDUzLjU0MSw0OC4xMTIwMDk1IEw0MC40NTUsNTQuODczMDA2NSBMMjgsNDguMzkzMDA5NCBMMjgsMzIuNTQ5MDE2NyBMMzguNTM3LDI1Ljg0NDAxOTcgQzM4LjgyNSwyNS42NjAwMTk4IDM5LDI1LjM0MjAxOTkgMzksMjUuMDAwMDIwMSBMMzksMTMuMDAwMDI1NiBDMzksMTIuNjQxMDI1NyAzOC44MDgsMTIuMzA5MDI1OSAzOC40OTYsMTIuMTMxMDI2IEMzOC4xODQsMTEuOTU0MDI2MSAzNy44MDIsMTEuOTU2MDI2MSAzNy40OTEsMTIuMTM5MDI2IEwxNS40OTEsMjUuMTM5MDIgQzE1LjE4NywyNS4zMTkwMiAxNSwyNS42NDYwMTk4IDE1LDI2LjAwMDAxOTYgTDE1LDU1IEMxNSw1NS4zNjkwMDYyIDE1LjIwNCw1NS43MDkwMDYxIDE1LjUzLDU1Ljg4MzAwNiBMMzkuOTg0LDY4Ljg4MzAwMDEgQzQwLjEzMSw2OC45NjEgNDAuMjkyLDY5IDQwLjQ1Myw2OSBDNDAuNjIsNjkgNDAuNzg2LDY4Ljk1OCA0MC45MzcsNjguODc1MDAwMSBMNjQuNDg0LDU1Ljg3NTAwNiBDNjQuNzk3LDU1LjcwMjAwNjEgNjQuOTkzLDU1LjM3NTAwNjIgNjUuMDAwMTQxNiw1NS4wMTgwMDY0IEM2NS4wMDYsNTQuNjYwMDA2NiA2NC44MjEsNTQuMzI2MDA2NyA2NC41MTUsNTQuMTQyMDA2OCBMNjQuNTE1LDU0LjE0MjAwNjggWiIgaWQ9IkFtYXpvbi1FbGFzdGljLUNvbnRhaW5lci1LdWJlcm5ldGVzX0ljb25fNjRfU3F1aWQiIGZpbGw9IiNGRkZGRkYiPjwvcGF0aD4KICAgIDwvZz4KPC9zdmc+" x="1295" y="295" width="40" height="40"/>
+        <text class="t" x="1315" y="362">EKS cluster</text>
+        <text class="s" x="1315" y="384">payments · orders · redis</text>
+        <text class="f" x="1315" y="406">+ CloudWatch logs &amp; metrics</text>
+        <text class="f" x="1315" y="426">(full detail: Phase 1 diagram)</text>
+      </g>
+      <path id="w5" class="wire w-trigger" d="M1090,310 C1125,310 1150,328 1175,346" marker-end="url(#ah)"/>
+      <text class="lbl sm" x="1130" y="290">read-only tools</text>
+      <text class="lbl sm" x="1130" y="304">kubectl get · logs</text>
+      <path id="w6" class="wire w-crash" d="M1090,510 C1130,506 1155,472 1175,442" marker-end="url(#ah)"/>
+      <text class="lbl sm mut" x="1140" y="538">mutations — after ✅ only</text>
+    </g>
+
+    <!-- PACKETS -->
+    <circle data-step="2" r="4.4" class="pkt p-ui"><animateMotion dur="0.9s" repeatCount="indefinite"><mpath href="#w1"/></animateMotion></circle>
+    <circle data-step="3" r="4.4" class="pkt p-next"><animateMotion dur="1s" begin="0.4s" repeatCount="indefinite"><mpath href="#w2"/></animateMotion></circle>
+    <circle data-step="4" r="4.6" class="pkt p-llm"><animateMotion dur="1.5s" repeatCount="indefinite"><mpath href="#w3a"/></animateMotion></circle>
+    <circle data-step="4" r="4.6" class="pkt p-llm"><animateMotion dur="1.5s" begin="0.75s" repeatCount="indefinite"><mpath href="#w3b"/></animateMotion></circle>
+    <circle data-step="5" r="4" class="pkt p-hitl"><animateMotion dur="1s" repeatCount="indefinite"><mpath href="#w4a"/></animateMotion></circle>
+    <circle data-step="5" r="4" class="pkt p-hitl"><animateMotion dur="1s" begin="0.5s" repeatCount="indefinite"><mpath href="#w4b"/></animateMotion></circle>
+    <circle data-step="5" r="3.6" class="pkt p-hitl"><animateMotion dur="3s" repeatCount="indefinite"><mpath href="#w7a"/></animateMotion></circle>
+    <circle data-step="5" r="3.6" class="pkt p-hitl"><animateMotion dur="3s" begin="1.5s" repeatCount="indefinite"><mpath href="#w7b"/></animateMotion></circle>
+    <circle data-step="6" r="4.8" class="pkt p-ret"><animateMotion dur="1.5s" repeatCount="indefinite"><mpath href="#w8"/></animateMotion></circle>
+    <circle data-step="6" r="4.8" class="pkt p-ret"><animateMotion dur="1.5s" begin="0.75s" repeatCount="indefinite"><mpath href="#w8"/></animateMotion></circle>
+    <circle data-step="7" r="4.8" class="pkt p-trigger"><animateMotion dur="1.3s" repeatCount="indefinite"><mpath href="#w5"/></animateMotion></circle>
+    <circle data-step="7" r="4.8" class="pkt p-crash"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#w6"/></animateMotion></circle>
+  </svg>
+
+  <div class="legend" id="legend">
+    <span class="pill ok">✅ Durable session — survives crashes, redeploys &amp; OOM</span>
+    <span class="pill ctl">🙋 HITL — mutations pause for approval in chat</span>
+    <span class="pill warm">🔑 Per-chat scoped tokens — the browser never sees your secret</span>
+    <span class="pill link">🔗 Full Phase 1 + Phase 2 wiring comes later</span>
+  </div>
+
+  <div class="stepper">
+    <button id="prev">◀ Prev</button>
+    <span id="stepLabel"></span>
+    <button id="next">Next ▶</button>
+  </div>
+  <p class="hint">← / → arrow keys work too · press A to show everything</p>
+</div>
+
+<script>
+  const captions = [
+    ["Step 1 · Chat UI", "React + useChat — the user's window into the agent"],
+    ["Step 2 · Next.js transport", "Two server actions: start the session + mint a per-chat scoped token"],
+    ["Step 3 · chat.agent", "A durable session: wakes on messages, sleeps idle, never loses state"],
+    ["Step 4 · LLM loop", "Every turn: full history up, streamed tokens & tool calls down"],
+    ["Step 5 · Human-in-the-loop", "Risky tools pause; the approval card appears right in the chat"],
+    ["Step 6 · Realtime stream", "Tokens stream straight back to useChat — survives page refreshes"],
+    ["Step 7 · Doorway into AWS", "Read-only tools flow freely; mutations only after your ✅"],
+  ];
+  const MAX = captions.length;
+  let cur = 1;
+  const label = document.getElementById("stepLabel");
+  const legend = document.getElementById("legend");
+  const prevB = document.getElementById("prev");
+  const nextB = document.getElementById("next");
+
+  function render(fresh) {
+    document.querySelectorAll("[data-step]").forEach(el => {
+      const s = +el.dataset.step;
+      el.classList.toggle("off", s > cur);
+      el.classList.toggle("fresh", fresh && s === cur);
+    });
+    legend.classList.toggle("off", cur < MAX);
+    label.innerHTML = captions[cur-1][0] + " <small>" + captions[cur-1][1] + "</small>";
+    prevB.disabled = cur === 1;
+    nextB.disabled = cur === MAX;
+  }
+  function go(d) { const n = Math.min(MAX, Math.max(1, cur + d)); if (n !== cur) { cur = n; render(d > 0); } }
+  prevB.onclick = () => go(-1);
+  nextB.onclick = () => go(1);
+  document.addEventListener("keydown", e => {
+    if (e.key === "ArrowRight" || e.key === " ") { e.preventDefault(); go(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+    else if (e.key.toLowerCase() === "a") { cur = MAX; render(false); }
+  });
+  // deep-link: #step=N picks a step, &clean hides the controls (for screenshots)
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("step")) cur = Math.min(MAX, Math.max(1, +h.get("step") || 1));
+  if (h.has("clean")) {
+    document.querySelector(".stepper").style.display = "none";
+    document.querySelector(".hint").style.display = "none";
+  }
+  render(false);
+</script>
+</body>
+</html>
