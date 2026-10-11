@@ -94,6 +94,12 @@ main > p { color: #64748b; margin-top: 0; }
   border: 1px solid #e2e8f0; border-radius: 5px; padding: 0 5px;
   font-family: ui-monospace, Menlo, monospace; }
 .activity-item-hint { color: #94a3b8; font-size: 12px; padding-left: 20px; }
+.activity-cmd { margin: 6px 0 0 20px; display: flex; align-items: center; gap: 7px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.activity-cmd-label { flex: none; color: #94a3b8; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+.activity-cmd code { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 5px;
+  padding: 2px 8px; color: #334155; white-space: pre-wrap; word-break: break-all; }
 .activity-item-detail { max-height: 200px; overflow: auto; margin: 6px 0 0 20px;
   background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 8px 10px;
   font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre;

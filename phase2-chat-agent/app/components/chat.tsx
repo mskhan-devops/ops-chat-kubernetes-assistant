@@ -27,6 +27,7 @@ import {
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
 import { objectiveKeys } from "@/lib/objectives";
+import { formatCommand } from "@/lib/kubectl-args";
 
 type AnyPart = {
   type?: string;
@@ -179,8 +180,9 @@ function MarkdownText({ children }: { children: string }) {
   );
 }
 
-// One expandable row describing a single tool call (what it did + raw output).
-function ToolRow({ part }: { part: AnyPart }) {
+// One expandable row describing a single tool call (what it did + the exact
+// kubectl command + raw output).
+function ToolRow({ part, command }: { part: AnyPart; command: string }) {
   const name = toolNameOf(part);
   const running = isRunning(part);
   const failed = part.state === "output-error";
@@ -199,6 +201,12 @@ function ToolRow({ part }: { part: AnyPart }) {
         <span className="activity-item-name">{labelFor(name)}</span>
         <code className="activity-item-tool">{name}</code>
       </div>
+      {command && !running && (
+        <div className="activity-cmd">
+          <span className="activity-cmd-label">cmd</span>
+          <code>{command}</code>
+        </div>
+      )}
       {failed && part.errorText && (
         <pre className="activity-item-detail error">{part.errorText}</pre>
       )}
@@ -216,10 +224,12 @@ function ToolActivity({
   parts,
   open,
   onToggle,
+  commandOf,
 }: {
   parts: AnyPart[];
   open: boolean;
   onToggle: () => void;
+  commandOf: (part: AnyPart) => string;
 }) {
   if (parts.length === 0) return null;
 
@@ -257,7 +267,7 @@ function ToolActivity({
       {open && (
         <ul className="activity-list">
           {parts.map((p, i) => (
-            <ToolRow key={i} part={p} />
+            <ToolRow key={i} part={p} command={commandOf(p)} />
           ))}
         </ul>
       )}
@@ -382,6 +392,7 @@ function MessageBubble({
   isDeniedObjective,
   onResolve,
   copyEnabled,
+  commandOf,
 }: {
   role: string;
   parts: AnyPart[];
@@ -391,6 +402,7 @@ function MessageBubble({
   isDeniedObjective: (toolName: string, input: unknown) => boolean;
   onResolve: (part: AnyPart, approved: boolean) => void;
   copyEnabled: boolean;
+  commandOf: (part: AnyPart) => string;
 }) {
   const activity = parts.filter(
     (p) => p.type?.startsWith("tool-") && !p.type.startsWith("tool-propose"),
@@ -407,7 +419,7 @@ function MessageBubble({
           <span className="msg-name">{role === "user" ? "You" : "Ops agent"}</span>
           {ts ? <span className="msg-time">{formatTime(ts)}</span> : null}
         </div>
-        <ToolActivity parts={activity} open={activityOpen} onToggle={onToggleActivity} />
+        <ToolActivity parts={activity} open={activityOpen} onToggle={onToggleActivity} commandOf={commandOf} />
         <div className="parts">
           {parts.map((part, i) => {
             if (part.type === "text") {
@@ -438,15 +450,25 @@ function MessageBubble({
   );
 }
 
-export function Chat() {
+export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: string; kubeContext?: string }) {
   const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } =
     useChat({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
       // once the human answers a propose tool call, re-send so the agent picks up
       // the decision and continues the turn
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      // Pace the published messages snapshot. Without this, useChat's
+      // useSyncExternalStore re-reads a fresh messages array on every stream
+      // chunk, and when many chunks land faster than React can commit (fast
+      // local model, multi-step kubectl loops) a forced synchronous re-render
+      // per chunk trips React's "Maximum update depth exceeded" (vercel/ai
+      // #6166). The SDK publishes a throttled snapshot + terminal flush on
+      // `ready`, so 50ms pacing keeps streaming smooth without the loop.
+      experimental_throttle: 50,
       onError: (error) => console.error("[ops-chat] useChat error:", error),
     });
+  const commandOf = (part: AnyPart) =>
+    formatCommand(toolNameOf(part), (part.input ?? {}) as Record<string, unknown>, kubeBin, kubeContext);
   const [input, setInput] = useState("");
   // Timestamps are stamped client-side the first time a message id appears;
   // the UIMessage itself carries no clock.
@@ -647,6 +669,7 @@ export function Chat() {
             isDeniedObjective={isDeniedObjective}
             onResolve={resolveApproval}
             copyEnabled={!(status === "streaming" || status === "submitted") || mi !== messages.length - 1}
+            commandOf={commandOf}
           />
         ))}
         {showThinking && (

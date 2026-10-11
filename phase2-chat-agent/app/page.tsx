@@ -9,7 +9,7 @@ export default function Home() {
         Runs fully locally: LM Studio for inference, kubectl against your kind
         cluster. Ask about the cluster, approve fixes from chat.
       </p>
-      <Chat />
+      <Chat kubeBin={process.env.KUBECTL_BIN ?? "kubectl"} kubeContext={process.env.KUBE_CONTEXT ?? ""} />
     </main>
   );
 }

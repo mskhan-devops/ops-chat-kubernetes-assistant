@@ -3,6 +3,7 @@ import { z } from "zod";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ApprovalChecker } from "./approvals";
+import { kubectlArgs } from "./kubectl-args";
 
 const exec = promisify(execFile);
 
@@ -56,11 +57,8 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     description: "List pods in a namespace. If namespace omitted, lists across all namespaces (-A).",
     inputSchema: nsSchema.extend({ all: z.boolean().optional().default(false) }),
     execute: async ({ namespace, all }) => {
-      if (useRealCluster) {
-        if (all || !namespace) return kubectl(["get", "pods", "-A", "-o", "wide"]);
-        return kubectl(["get", "pods", "-n", namespace, "-o", "wide"]);
-      }
-      return MOCK_PODS;
+      if (!useRealCluster) return MOCK_PODS;
+      return kubectl(kubectlArgs("getPods", { namespace, all }));
     },
   }),
 
@@ -75,17 +73,15 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     }),
     execute: async ({ pod, namespace, container, lines, previous }) => {
       if (!useRealCluster) return MOCK_LOGS;
-      const args = ["logs", pod, "-n", namespace, `--tail=${lines}`];
-      if (container) args.push("-c", container);
-      if (previous) args.push("-p");
-      return kubectl(args);
+      return kubectl(kubectlArgs("getPodLogs", { pod, namespace, container, lines, previous }));
     },
   }),
 
   describePod: tool({
     description: "Describe a pod with detailed events and status.",
     inputSchema: z.object({ pod: z.string(), namespace: z.string() }),
-    execute: async ({ pod, namespace }) => (useRealCluster ? kubectl(["describe", "pod", pod, "-n", namespace]) : "describe: mock"),
+    execute: async ({ pod, namespace }) =>
+      useRealCluster ? kubectl(kubectlArgs("describePod", { pod, namespace })) : "describe: mock",
   }),
 
   getEvents: tool({
@@ -93,11 +89,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ since: z.string().optional() }),
     execute: async ({ namespace, since }) => {
       if (!useRealCluster) return "mock events";
-      const args = ["get", "events", "-o", "wide"];
-      if (namespace) args.push("-n", namespace);
-      else args.push("-A");
-      if (since) args.push(`--since=${since}`);
-      return kubectl(args);
+      return kubectl(kubectlArgs("getEvents", { namespace, since }));
     },
   }),
 
@@ -106,8 +98,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "services: mock";
-      if (all || !namespace) return kubectl(["get", "svc", "-A", "-o", "wide"]);
-      return kubectl(["get", "svc", "-n", namespace, "-o", "wide"]);
+      return kubectl(kubectlArgs("getServices", { namespace, all }));
     },
   }),
 
@@ -116,8 +107,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "deployments: mock";
-      if (all || !namespace) return kubectl(["get", "deploy", "-A", "-o", "wide"]);
-      return kubectl(["get", "deploy", "-n", namespace, "-o", "wide"]);
+      return kubectl(kubectlArgs("getDeployments", { namespace, all }));
     },
   }),
 
@@ -126,8 +116,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "sts: mock";
-      if (all || !namespace) return kubectl(["get", "sts", "-A", "-o", "wide"]);
-      return kubectl(["get", "sts", "-n", namespace, "-o", "wide"]);
+      return kubectl(kubectlArgs("getStatefulSets", { namespace, all }));
     },
   }),
 
@@ -136,15 +125,14 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "ds: mock";
-      if (all || !namespace) return kubectl(["get", "ds", "-A", "-o", "wide"]);
-      return kubectl(["get", "ds", "-n", namespace, "-o", "wide"]);
+      return kubectl(kubectlArgs("getDaemonSets", { namespace, all }));
     },
   }),
 
   getNodes: tool({
     description: "List nodes.",
     inputSchema: z.object({}),
-    execute: async () => (useRealCluster ? kubectl(["get", "nodes", "-o", "wide"]) : "nodes: mock"),
+    execute: async () => (useRealCluster ? kubectl(kubectlArgs("getNodes", {})) : "nodes: mock"),
   }),
 
   getConfigMaps: tool({
@@ -152,8 +140,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "cm: mock";
-      if (all || !namespace) return kubectl(["get", "cm", "-A"]);
-      return kubectl(["get", "cm", "-n", namespace]);
+      return kubectl(kubectlArgs("getConfigMaps", { namespace, all }));
     },
   }),
 
@@ -162,8 +149,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "secrets: mock";
-      if (all || !namespace) return kubectl(["get", "secrets", "-A"]);
-      return kubectl(["get", "secrets", "-n", namespace]);
+      return kubectl(kubectlArgs("getSecrets", { namespace, all }));
     },
   }),
 
@@ -172,8 +158,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "ingress: mock";
-      if (all || !namespace) return kubectl(["get", "ingress", "-A"]);
-      return kubectl(["get", "ingress", "-n", namespace]);
+      return kubectl(kubectlArgs("getIngresses", { namespace, all }));
     },
   }),
 
@@ -182,15 +167,14 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "pvc: mock";
-      if (all || !namespace) return kubectl(["get", "pvc", "-A"]);
-      return kubectl(["get", "pvc", "-n", namespace]);
+      return kubectl(kubectlArgs("getPvc", { namespace, all }));
     },
   }),
 
   getPv: tool({
     description: "List PVs.",
     inputSchema: z.object({}),
-    execute: async () => (useRealCluster ? kubectl(["get", "pv"]) : "pv: mock"),
+    execute: async () => (useRealCluster ? kubectl(kubectlArgs("getPv", {})) : "pv: mock"),
   }),
 
   getHpa: tool({
@@ -198,15 +182,14 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "hpa: mock";
-      if (all || !namespace) return kubectl(["get", "hpa", "-A"]);
-      return kubectl(["get", "hpa", "-n", namespace]);
+      return kubectl(kubectlArgs("getHpa", { namespace, all }));
     },
   }),
 
   getTopNodes: tool({
     description: "Get node resource usage.",
     inputSchema: z.object({}),
-    execute: async () => (useRealCluster ? kubectl(["top", "nodes"]) : "top nodes: mock"),
+    execute: async () => (useRealCluster ? kubectl(kubectlArgs("getTopNodes", {})) : "top nodes: mock"),
   }),
 
   getTopPods: tool({
@@ -214,8 +197,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema.extend({ all: z.boolean().optional() }),
     execute: async ({ namespace, all }) => {
       if (!useRealCluster) return "top pods: mock";
-      if (all || !namespace) return kubectl(["top", "pods", "-A"]);
-      return kubectl(["top", "pods", "-n", namespace]);
+      return kubectl(kubectlArgs("getTopPods", { namespace, all }));
     },
   }),
 
@@ -224,7 +206,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     inputSchema: nsSchema,
     execute: async ({ namespace }) => {
       if (!useRealCluster) return "metrics: mock";
-      return kubectl(["get", "--raw", namespace ? `/apis/metrics.k8s.io/v1beta1/namespaces/${namespace}/pods` : "/apis/metrics.k8s.io/v1beta1/pods"]);
+      return kubectl(kubectlArgs("getMetrics", { namespace }));
     },
   }),
 
@@ -296,7 +278,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     execute: async ({ pod, namespace }) => {
       requireApproval("deletePod", { pod, namespace });
       if (!useRealCluster) return `pod ${pod} deleted (mock)`;
-      return kubectl(["delete", "pod", pod, "-n", namespace, "--wait=false"]);
+      return kubectl(kubectlArgs("deletePod", { pod, namespace }));
     },
   }),
 
@@ -312,16 +294,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
       requireApproval("setMemoryLimit", { workload, kind, namespace, memory });
       if (!useRealCluster) return `${workload} memory set to ${memory} (mock)`;
       if (kind === "deployment" || kind === "statefulset" || kind === "daemonset") {
-        const patch = JSON.stringify({
-          spec: {
-            template: {
-              spec: {
-                containers: [{ name: workload, resources: { limits: { memory }, requests: { memory } } }],
-              },
-            },
-          },
-        });
-        const patched = await kubectl(["patch", kind, workload, "-n", namespace, "--type=strategic", "-p", patch]);
+        const patched = await kubectl(kubectlArgs("setMemoryLimit", { workload, kind, namespace, memory }));
         try {
           const rolled = await kubectl(["rollout", "status", `${kind}/${workload}`, "-n", namespace, "--timeout=180s"]);
           return `${patched.trim()}\n${rolled.trim()}`;
@@ -344,7 +317,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     execute: async ({ workload, kind, namespace, replicas }) => {
       requireApproval("scaleWorkload", { workload, kind, namespace, replicas });
       if (!useRealCluster) return `scaled ${workload} to ${replicas} (mock)`;
-      return kubectl(["scale", `${kind}/${workload}`, `--replicas=${replicas}`, "-n", namespace]);
+      return kubectl(kubectlArgs("scaleWorkload", { workload, kind, namespace, replicas }));
     },
   }),
 
@@ -359,7 +332,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     execute: async ({ workload, kind, namespace }) => {
       requireApproval("rolloutRestart", { workload, kind, namespace });
       if (!useRealCluster) return `restarted ${workload} (mock)`;
-      return kubectl(["rollout", "restart", `${kind}/${workload}`, "-n", namespace]);
+      return kubectl(kubectlArgs("rolloutRestart", { workload, kind, namespace }));
     },
   }),
 
@@ -388,9 +361,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     execute: async ({ kind, name, namespace }) => {
       requireApproval("deleteResource", { kind, name, namespace });
       if (!useRealCluster) return `deleted ${kind}/${name} (mock)`;
-      const args = ["delete", kind, name];
-      if (namespace) args.push("-n", namespace);
-      return kubectl(args);
+      return kubectl(kubectlArgs("deleteResource", { kind, name, namespace }));
     },
   }),
 
@@ -404,10 +375,7 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     }),
     execute: async ({ pod, namespace, container, command }) => {
       if (!useRealCluster) return "exec: mock";
-      const args = ["exec", "-n", namespace, pod];
-      if (container) args.push("-c", container);
-      args.push("--", "sh", "-c", command);
-      return kubectl(args);
+      return kubectl(kubectlArgs("execCommand", { pod, namespace, container, command }));
     },
   }),
 
@@ -422,8 +390,10 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
     execute: async ({ resource, namespace, localPort, remotePort }) => {
       if (!useRealCluster) return `port-forwarding ${resource}:${remotePort} -> localhost:${localPort} (mock)`;
       // Best effort; fire and forget in practice for this context
-      const args = ["port-forward", "-n", namespace, resource, `${localPort}:${remotePort}`];
-      exec(KUBECTL_BIN, KUBE_CONTEXT ? ["--context", KUBE_CONTEXT, ...args] : args, { timeout: 1000 }).catch(() => {});
+      const args = KUBE_CONTEXT
+        ? ["--context", KUBE_CONTEXT, ...kubectlArgs("portForward", { resource, namespace, localPort, remotePort })]
+        : kubectlArgs("portForward", { resource, namespace, localPort, remotePort });
+      exec(KUBECTL_BIN, args, { timeout: 1000 }).catch(() => {});
       return `Initiated port-forward ${resource}:${remotePort} -> localhost:${localPort}`;
     },
   }),
