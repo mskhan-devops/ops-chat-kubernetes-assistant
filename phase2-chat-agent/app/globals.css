@@ -47,6 +47,12 @@ main > p { color: #64748b; margin-top: 0; }
 .msg.user .msg-name { color: #166534; }
 .msg.user .msg-time { color: #4d7c5f; }
 
+/* Copy-answer button at the end of an assistant bubble */
+.msg-copy { display: flex; justify-content: flex-end; margin-top: 6px; }
+.msg-copy .copy-btn { position: static; opacity: 1; color: #334155;
+  background: #f8fafc; border: 1px solid #e2e8f0; }
+.msg-copy .copy-btn:hover { background: #f1f5f9; }
+
 .msg p { margin: 2px 0; white-space: pre-wrap; }
 .msg .tool { color: #64748b; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
 .msg .tool.mut { color: #b91c1c; font-weight: 700; }

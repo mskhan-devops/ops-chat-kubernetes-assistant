@@ -73,6 +73,16 @@ const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
 
 const toolNameOf = (part: AnyPart) => (part.type ?? "").slice("tool-".length);
 
+// The full prose of an assistant turn, as raw markdown — this is what the
+// "Copy answer" button puts on the clipboard.
+function assistantText(parts: AnyPart[]): string {
+  return parts
+    .filter((p) => p.type === "text")
+    .map((p) => p.text ?? "")
+    .join("\n\n")
+    .trim();
+}
+
 const isRunning = (part: AnyPart) =>
   part.state === "input-streaming" || part.state === "input-available";
 
@@ -95,15 +105,46 @@ function reactText(node: ReactNode): string {
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   if (!text) return null;
+
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    // Modern async Clipboard API first, then the legacy textarea +
+    // execCommand fallback (needed in non-secure contexts or when the
+    // Clipboard API is unavailable/rejected).
+    const toClipboard = async (): Promise<boolean> => {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          // fall through to the legacy path below
+        }
+      }
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.top = "0";
+        ta.style.left = "0";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        return ok;
+      } catch {
+        return false;
+      }
+    };
+
+    if (await toClipboard()) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1400);
-    } catch {
-      /* clipboard blocked — nothing useful to do */
     }
   };
+
   return (
     <button type="button" className="copy-btn" onClick={copy}>
       {copied ? "Copied ✓" : "Copy"}
@@ -340,6 +381,7 @@ function MessageBubble({
   onToggleActivity,
   isDeniedObjective,
   onResolve,
+  copyEnabled,
 }: {
   role: string;
   parts: AnyPart[];
@@ -348,10 +390,12 @@ function MessageBubble({
   onToggleActivity: () => void;
   isDeniedObjective: (toolName: string, input: unknown) => boolean;
   onResolve: (part: AnyPart, approved: boolean) => void;
+  copyEnabled: boolean;
 }) {
   const activity = parts.filter(
     (p) => p.type?.startsWith("tool-") && !p.type.startsWith("tool-propose"),
   );
+  const answer = role === "assistant" ? assistantText(parts) : "";
 
   return (
     <div className={`msg ${role}`}>
@@ -384,6 +428,11 @@ function MessageBubble({
             return null;
           })}
         </div>
+        {copyEnabled && answer && (
+          <div className="msg-copy">
+            <CopyButton text={answer} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -556,6 +605,7 @@ export function Chat() {
             onToggleActivity={() => setActivityOpen((o) => !o)}
             isDeniedObjective={isDeniedObjective}
             onResolve={resolveApproval}
+            copyEnabled={!(status === "streaming" || status === "submitted") || mi !== messages.length - 1}
           />
         ))}
         {showThinking && (
