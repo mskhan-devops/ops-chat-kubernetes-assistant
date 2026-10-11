@@ -10,6 +10,7 @@
 // same target. A denial for a target always wins over any older approval.
 
 import type { UIMessage } from "ai";
+import { objectiveKeys } from "./objectives";
 
 // mutation tool -> the propose tool that must gate it
 const PROPOSAL_FOR: Record<string, string> = {
@@ -64,6 +65,10 @@ export type ApprovalChecker = (mutation: string, args: Record<string, unknown>) 
 
 export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
   const proposals: Proposal[] = [];
+  // Objectives the human denied, keyed by the change rather than the tool, so a
+  // denial via proposeMemoryIncrease also blocks reaching the same change via
+  // proposeApply (and vice-versa).
+  const deniedKeys = new Set<string>();
 
   for (const message of messages) {
     for (const part of message.parts ?? []) {
@@ -76,11 +81,17 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
       };
       if (!p.type?.startsWith("tool-propose")) continue;
       if (p.state !== "output-available") continue;
+      const toolName = p.type.slice("tool-".length);
+      const input = (p.input ?? {}) as Record<string, unknown>;
+      const approved = (p.output as { approved?: boolean } | undefined)?.approved === true;
+      if (!approved) {
+        for (const key of objectiveKeys(toolName, input)) deniedKeys.add(key);
+      }
       proposals.push({
         id: p.toolCallId ?? "",
-        toolName: p.type.slice("tool-".length),
-        input: (p.input ?? {}) as Record<string, unknown>,
-        approved: (p.output as { approved?: boolean } | undefined)?.approved === true,
+        toolName,
+        input,
+        approved,
         consumed: false,
       });
     }
@@ -131,6 +142,15 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
     if (!proposal.approved) {
       throw new Error(
         `Action blocked: the user DENIED the ${proposalName} for this target. Do not retry or work around it; tell the user it was denied.`,
+      );
+    }
+
+    // Cross-tool denial: even if this proposal was approved, an earlier denial
+    // for the same underlying change wins. This stops the model from routing a
+    // denied change through a different mutation tool.
+    if (objectiveKeys(mutation, args).some((key) => deniedKeys.has(key))) {
+      throw new Error(
+        `Action blocked: the user already DENIED this change (via a different proposal). A denial is final — do not re-apply it through another tool. Tell the user it was denied.`,
       );
     }
 

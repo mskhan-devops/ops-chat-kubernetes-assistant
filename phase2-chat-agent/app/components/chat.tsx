@@ -17,6 +17,7 @@ import {
   isToolUIPart,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
+import { objectiveKeys } from "@/lib/objectives";
 
 function MarkdownText({ children }: { children: string }) {
   return (
@@ -37,10 +38,63 @@ export function Chat() {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Objectives (changes) the human has already denied, and proposal ids we have
+  // auto-resolved so we don't dispatch the same denial twice.
+  const deniedKeysRef = useRef<Set<string>>(new Set());
+  const autoDeniedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Rebuild the set of denied objectives from history. A denial is scoped to the
+  // change, so we key it via objectiveKeys() (shared with the server).
+  useEffect(() => {
+    const denied = new Set<string>();
+    for (const m of messages) {
+      for (const part of m.parts) {
+        const p = part as { type?: string; state?: string; input?: unknown; output?: unknown };
+        if (!p.type?.startsWith("tool-propose")) continue;
+        if (p.state !== "output-available") continue;
+        if ((p.output as { approved?: boolean } | undefined)?.approved !== false) continue;
+        const toolName = p.type.slice("tool-".length);
+        for (const key of objectiveKeys(toolName, (p.input ?? {}) as Record<string, unknown>)) {
+          denied.add(key);
+        }
+      }
+    }
+    deniedKeysRef.current = denied;
+  }, [messages]);
+
+  const isDeniedObjective = (toolName: string, input: unknown) =>
+    objectiveKeys(toolName, (input ?? {}) as Record<string, unknown>).some((k) =>
+      deniedKeysRef.current.has(k),
+    );
+
+  // A denied objective must not be re-offered. If the model re-proposes the same
+  // change through any tool, resolve it as denied automatically instead of
+  // showing another approval card, then let the auto-resend teach the agent that
+  // the denial still stands.
+  useEffect(() => {
+    if (deniedKeysRef.current.size === 0) return;
+    for (const m of messages) {
+      for (const part of m.parts) {
+        const p = part as { type?: string; state?: string; toolCallId?: string; input?: unknown };
+        if (!p.type?.startsWith("tool-propose")) continue;
+        if (p.state !== "input-available" || !p.toolCallId) continue;
+        if (autoDeniedIdsRef.current.has(p.toolCallId)) continue;
+        const toolName = p.type.slice("tool-".length);
+        if (!isDeniedObjective(toolName, p.input)) continue;
+        autoDeniedIdsRef.current.add(p.toolCallId);
+        addToolOutput({
+          tool: toolName,
+          toolCallId: p.toolCallId,
+          output: { approved: false },
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, addToolOutput]);
 
   const submitInput = () => {
     if (!input.trim()) return;
@@ -111,6 +165,15 @@ export function Chat() {
                     );
                   }
                   if (part.state === "input-available") {
+                    // Already denied earlier (possibly via a different tool that
+                    // targets the same change) — never offer it again.
+                    if (isDeniedObjective(toolName, toolInput)) {
+                      return (
+                        <p key={i} className="tool">
+                          ❌ {toolName} · denied earlier, skipped
+                        </p>
+                      );
+                    }
                     const renderSummary = () => {
                       if (toolName === "proposeDeletion") return <>delete pod <code>{toolInput?.pod}</code> in <code>{toolInput?.namespace}</code></>;
                       if (toolName === "proposeMemoryIncrease") return <>raise memory of <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.memory}</code></>;
