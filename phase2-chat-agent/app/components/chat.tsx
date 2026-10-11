@@ -16,7 +16,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -76,6 +76,41 @@ const toolNameOf = (part: AnyPart) => (part.type ?? "").slice("tool-".length);
 const isRunning = (part: AnyPart) =>
   part.state === "input-streaming" || part.state === "input-available";
 
+function formatTime(ts: number) {
+  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// Flatten react-markdown's children back to plain text so a fenced code block
+// can be copied verbatim.
+function reactText(node: ReactNode): string {
+  if (node === null || node === undefined || node === false) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactText).join("");
+  if (typeof node === "object" && "props" in node) {
+    return reactText((node as { props: { children?: ReactNode } }).props.children);
+  }
+  return "";
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch {
+      /* clipboard blocked — nothing useful to do */
+    }
+  };
+  return (
+    <button type="button" className="copy-btn" onClick={copy}>
+      {copied ? "Copied ✓" : "Copy"}
+    </button>
+  );
+}
+
 function MarkdownText({ children }: { children: string }) {
   return (
     <div className="markdown">
@@ -86,6 +121,13 @@ function MarkdownText({ children }: { children: string }) {
           table: ({ node, ...props }) => (
             <div className="table-wrap">
               <table {...props} />
+            </div>
+          ),
+          // Fenced code gets a copy button (the agent prints commands/manifests).
+          pre: ({ node, children, ...props }) => (
+            <div className="code-block">
+              <CopyButton text={reactText(children)} />
+              <pre {...props}>{children}</pre>
             </div>
           ),
         }}
@@ -128,8 +170,16 @@ function ToolRow({ part }: { part: AnyPart }) {
 }
 
 // All non-approval tool calls of a turn, collapsed into a single summary strip.
-function ToolActivity({ parts }: { parts: AnyPart[] }) {
-  const [open, setOpen] = useState(false);
+// Open state is owned by the Chat so one toggle can expand/collapse every strip.
+function ToolActivity({
+  parts,
+  open,
+  onToggle,
+}: {
+  parts: AnyPart[];
+  open: boolean;
+  onToggle: () => void;
+}) {
   if (parts.length === 0) return null;
 
   const running = parts.some(isRunning);
@@ -145,7 +195,7 @@ function ToolActivity({ parts }: { parts: AnyPart[] }) {
       <button
         type="button"
         className="activity-toggle"
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
         aria-expanded={open}
       >
         <span className="chev" aria-hidden="true">
@@ -285,11 +335,17 @@ function ApprovalCard({
 function MessageBubble({
   role,
   parts,
+  ts,
+  activityOpen,
+  onToggleActivity,
   isDeniedObjective,
   onResolve,
 }: {
   role: string;
   parts: AnyPart[];
+  ts?: number;
+  activityOpen: boolean;
+  onToggleActivity: () => void;
   isDeniedObjective: (toolName: string, input: unknown) => boolean;
   onResolve: (part: AnyPart, approved: boolean) => void;
 }) {
@@ -303,7 +359,11 @@ function MessageBubble({
         {role === "user" ? "🧑" : "🤖"}
       </span>
       <div className="bubble">
-        <ToolActivity parts={activity} />
+        <div className="msg-meta">
+          <span className="msg-name">{role === "user" ? "You" : "Ops agent"}</span>
+          {ts ? <span className="msg-time">{formatTime(ts)}</span> : null}
+        </div>
+        <ToolActivity parts={activity} open={activityOpen} onToggle={onToggleActivity} />
         <div className="parts">
           {parts.map((part, i) => {
             if (part.type === "text") {
@@ -339,6 +399,11 @@ export function Chat() {
       onError: (error) => console.error("[ops-chat] useChat error:", error),
     });
   const [input, setInput] = useState("");
+  // Timestamps are stamped client-side the first time a message id appears;
+  // the UIMessage itself carries no clock.
+  const [timestamps, setTimestamps] = useState<Record<string, number>>({});
+  // Global open/closed state for every ToolActivity strip.
+  const [activityOpen, setActivityOpen] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -354,6 +419,21 @@ export function Chat() {
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
     if (nearBottom) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Stamp each message as it first arrives.
+  useEffect(() => {
+    setTimestamps((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const m of messages) {
+        if (!(m.id in next)) {
+          next[m.id] = Date.now();
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, [messages]);
 
   // Rebuild the set of denied objectives from history. A denial is scoped to the
@@ -444,14 +524,36 @@ export function Chat() {
   const lastWorkingTool = lastParts.some((p) => isToolUIPart(p as never) && isRunning(p));
   const showThinking = status === "streaming" && !lastWorkingTool;
 
+  // Only offer the global toggle once there is something to collapse.
+  const hasActivity = messages.some((m) =>
+    (m.parts as AnyPart[]).some(
+      (p) => p.type?.startsWith("tool-") && !p.type.startsWith("tool-propose"),
+    ),
+  );
+
   return (
     <div className="chat">
+      {hasActivity && (
+        <div className="chat-toolbar">
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => setActivityOpen((o) => !o)}
+            aria-expanded={activityOpen}
+          >
+            {activityOpen ? "▾ Hide tool steps" : "▸ Show tool steps"}
+          </button>
+        </div>
+      )}
       <div className="messages" ref={messagesRef}>
         {messages.map((m, mi) => (
           <MessageBubble
             key={`${m.id}-${mi}`}
             role={m.role}
             parts={m.parts as AnyPart[]}
+            ts={timestamps[m.id]}
+            activityOpen={activityOpen}
+            onToggleActivity={() => setActivityOpen((o) => !o)}
             isDeniedObjective={isDeniedObjective}
             onResolve={resolveApproval}
           />

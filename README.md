@@ -28,7 +28,7 @@ phase1-local-cluster/up.sh
 ```bash
 cd phase2-chat-agent
 npm install
-cp .env.example .env.local     # then set LM_STUDIO_MODEL + KUBE_CONTEXT
+# cp .env.example .env.local     # then set LM_STUDIO_MODEL + KUBE_CONTEXT
 npm run dev                    # http://localhost:3000
 ```
 
