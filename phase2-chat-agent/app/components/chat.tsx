@@ -9,12 +9,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   DefaultChatTransport,
   getToolName,
   isToolUIPart,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai";
+
+function MarkdownText({ children }: { children: string }) {
+  return (
+    <div className="markdown">
+      <Markdown remarkPlugins={[remarkGfm]}>{children}</Markdown>
+    </div>
+  );
+}
 
 export function Chat() {
   const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } = useChat({
@@ -26,10 +36,35 @@ export function Chat() {
   });
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const submitInput = () => {
+    if (!input.trim()) return;
+    sendMessage({ text: input });
+    setInput("");
+    if (inputRef.current) {
+      inputRef.current.style.height = "auto";
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter sends; Shift+Enter inserts a newline.
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (status !== "streaming") submitInput();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
+  };
 
   // While a turn is streaming, show a spinner for the model itself unless a
   // tool line is already showing its own in-progress spinner.
@@ -49,7 +84,8 @@ export function Chat() {
             <span className="role">{m.role === "user" ? "🧑" : "🤖"}</span>
             <div className="parts">
               {m.parts.map((part, i) => {
-                if (part.type === "text") return <p key={i}>{part.text}</p>;
+                if (part.type === "text")
+                  return <MarkdownText key={i}>{part.text}</MarkdownText>;
 
                 // HITL approval card. The agent called a no-execute propose tool
                 // and is paused waiting for us.
@@ -181,16 +217,16 @@ export function Chat() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (input.trim()) {
-            sendMessage({ text: input });
-            setInput("");
-          }
+          submitInput();
         }}
       >
-        <input
+        <textarea
+          ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder='Try: "why is payments crashing?"'
+          onChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          rows={1}
+          placeholder='Try: "why is payments crashing?" — Shift+Enter for a new line'
         />
         <button type="submit" disabled={status === "streaming"}>
           Send

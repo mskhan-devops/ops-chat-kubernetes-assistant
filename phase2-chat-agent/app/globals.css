@@ -16,6 +16,36 @@ main > p { color: #64748b; margin-top: 0; }
 .msg .role { flex: none; }
 .msg p { margin: 2px 0; white-space: pre-wrap; }
 .msg .tool { color: #64748b; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+
+/* Rendered markdown from assistant/user messages */
+.markdown { overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p { margin: 6px 0; white-space: normal; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+  margin: 12px 0 6px; line-height: 1.25; }
+.markdown h1 { font-size: 1.25em; }
+.markdown h2 { font-size: 1.15em; }
+.markdown h3 { font-size: 1.05em; }
+.markdown ul, .markdown ol { margin: 6px 0; padding-left: 22px; }
+.markdown li { margin: 2px 0; }
+.markdown a { color: #16a34a; }
+.markdown code { background: #f1f5f9; border: 1px solid #e2e8f0;
+  border-radius: 5px; padding: 1px 5px; font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.88em; }
+.markdown pre { background: #0f172a; color: #e2e8f0; border-radius: 10px;
+  padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+.markdown pre code { background: transparent; border: none; padding: 0;
+  color: inherit; font-size: 0.85em; }
+.markdown table { border-collapse: collapse; margin: 8px 0; width: 100%;
+  font-size: 0.9em; }
+.markdown th, .markdown td { border: 1px solid #cbd5e1; padding: 5px 9px;
+  text-align: left; }
+.markdown th { background: #f1f5f9; font-weight: 700; }
+.markdown tr:nth-child(even) td { background: #f8fafc; }
+.markdown blockquote { border-left: 3px solid #cbd5e1; margin: 8px 0;
+  padding: 2px 12px; color: #475569; }
+.markdown hr { border: none; border-top: 1px solid #e2e8f0; margin: 12px 0; }
 .msg .tool.mut { color: #b91c1c; font-weight: 700; }
 .msg .tool.working { color: #16a34a; font-weight: 600; }
 
@@ -39,9 +69,10 @@ main > p { color: #64748b; margin-top: 0; }
 .error-banner button { border: none; background: transparent; color: #7f1d1d;
   font-weight: 700; cursor: pointer; }
 
-form { display: flex; gap: 8px; margin-top: 14px; }
-form input { flex: 1; padding: 10px 14px; border: 1.5px solid #cbd5e1;
-  border-radius: 999px; font: inherit; }
+form { display: flex; align-items: flex-end; gap: 8px; margin-top: 14px; }
+form textarea { flex: 1; padding: 10px 14px; border: 1.5px solid #cbd5e1;
+  border-radius: 18px; font: inherit; line-height: 1.4; resize: none;
+  min-height: 42px; max-height: 220px; overflow-y: auto; }
 form button { padding: 10px 18px; border: none; border-radius: 999px;
   background: #16a34a; color: #fff; font-weight: 700; cursor: pointer; }
 form button[disabled] { opacity: 0.4; cursor: default; }
