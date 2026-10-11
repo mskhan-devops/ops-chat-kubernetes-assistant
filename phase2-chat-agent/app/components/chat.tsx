@@ -4,6 +4,15 @@
 // sends it to /api/chat; the HITL approval card resolves the no-execute
 // proposeDeletion / proposeMemoryIncrease tool calls via addToolOutput, which
 // re-sends the message so the agent continues (and only then runs the mutation).
+//
+// Readability rules (see the layout in this file):
+//   * every turn is a MessageBubble — the user is tinted and right-aligned, the
+//     assistant is plain and left-aligned, so turn boundaries are obvious;
+//   * non-approval tool calls are *grouped* into a single collapsible
+//     ToolActivity strip instead of one noisy line per call;
+//   * tool names and states are shown in human terms ("Listed pods", ✓ / failed)
+//     rather than the raw AI SDK values ("getPods · output-available").
+// Propose* tool calls stay as visible, interactive ApprovalCards.
 
 "use client";
 
@@ -19,23 +28,318 @@ import {
 } from "ai";
 import { objectiveKeys } from "@/lib/objectives";
 
+type AnyPart = {
+  type?: string;
+  state?: string;
+  toolCallId?: string;
+  input?: unknown;
+  output?: unknown;
+  errorText?: string;
+  text?: string;
+};
+
+// Turn the model-facing tool names into something a human reads at a glance.
+const TOOL_LABELS: Record<string, string> = {
+  getNamespaces: "Listed namespaces",
+  getPods: "Listed pods",
+  getPodLogs: "Read pod logs",
+  describePod: "Inspected pod",
+  getEvents: "Read events",
+  getServices: "Listed services",
+  getDeployments: "Listed deployments",
+  getStatefulSets: "Listed statefulsets",
+  getDaemonSets: "Listed daemonsets",
+  getNodes: "Listed nodes",
+  getConfigMaps: "Listed configmaps",
+  getSecrets: "Listed secrets",
+  getIngresses: "Listed ingresses",
+  getPvc: "Listed PVCs",
+  getPv: "Listed PVs",
+  getHpa: "Listed HPAs",
+  getTopNodes: "Checked node usage",
+  getTopPods: "Checked pod usage",
+  getMetrics: "Read metrics",
+  deletePod: "Deleted pod",
+  setMemoryLimit: "Set memory limit",
+  scaleWorkload: "Scaled workload",
+  rolloutRestart: "Restarted rollout",
+  applyManifest: "Applied manifest",
+  deleteResource: "Deleted resource",
+  execCommand: "Ran command in pod",
+  portForward: "Started port-forward",
+};
+
+const labelFor = (name: string) => TOOL_LABELS[name] ?? name;
+
+const toolNameOf = (part: AnyPart) => (part.type ?? "").slice("tool-".length);
+
+const isRunning = (part: AnyPart) =>
+  part.state === "input-streaming" || part.state === "input-available";
+
 function MarkdownText({ children }: { children: string }) {
   return (
     <div className="markdown">
-      <Markdown remarkPlugins={[remarkGfm]}>{children}</Markdown>
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // Wide kubectl tables must scroll inside the bubble, not stretch it.
+          table: ({ node, ...props }) => (
+            <div className="table-wrap">
+              <table {...props} />
+            </div>
+          ),
+        }}
+      >
+        {children}
+      </Markdown>
+    </div>
+  );
+}
+
+// One expandable row describing a single tool call (what it did + raw output).
+function ToolRow({ part }: { part: AnyPart }) {
+  const name = toolNameOf(part);
+  const running = isRunning(part);
+  const failed = part.state === "output-error";
+  const output = part.output;
+
+  return (
+    <li className={`activity-item${failed ? " fail" : ""}`}>
+      <div className="activity-item-head">
+        {running ? (
+          <span className="spinner" aria-hidden="true" />
+        ) : (
+          <span className="activity-icon" aria-hidden="true">
+            {failed ? "✕" : "✓"}
+          </span>
+        )}
+        <span className="activity-item-name">{labelFor(name)}</span>
+        <code className="activity-item-tool">{name}</code>
+      </div>
+      {failed && part.errorText && (
+        <pre className="activity-item-detail error">{part.errorText}</pre>
+      )}
+      {!failed && !running && output !== undefined && output !== "" && (
+        <pre className="activity-item-detail">{String(output)}</pre>
+      )}
+      {running && <div className="activity-item-hint">running…</div>}
+    </li>
+  );
+}
+
+// All non-approval tool calls of a turn, collapsed into a single summary strip.
+function ToolActivity({ parts }: { parts: AnyPart[] }) {
+  const [open, setOpen] = useState(false);
+  if (parts.length === 0) return null;
+
+  const running = parts.some(isRunning);
+  const failed = parts.some((p) => p.state === "output-error");
+
+  const labels = Array.from(new Set(parts.map((p) => labelFor(toolNameOf(p)))));
+  const summary =
+    labels.slice(0, 3).join(", ") +
+    (labels.length > 3 ? ` +${labels.length - 3} more` : "");
+
+  return (
+    <div className={`activity${open ? " open" : ""}`}>
+      <button
+        type="button"
+        className="activity-toggle"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="chev" aria-hidden="true">
+          {open ? "▾" : "▸"}
+        </span>
+        {running ? (
+          <span className="spinner" aria-hidden="true" />
+        ) : (
+          <span className={`activity-icon${failed ? " fail" : " ok"}`} aria-hidden="true">
+            {failed ? "✕" : "✓"}
+          </span>
+        )}
+        <span className="activity-count">
+          {parts.length} {parts.length === 1 ? "step" : "steps"}
+        </span>
+        <span className="activity-summary">· {summary}</span>
+      </button>
+      {open && (
+        <ul className="activity-list">
+          {parts.map((p, i) => (
+            <ToolRow key={i} part={p} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function approvalSummary(toolName: string, input: Record<string, unknown>) {
+  switch (toolName) {
+    case "proposeDeletion":
+      return (
+        <>
+          delete pod <code>{String(input.pod)}</code> in{" "}
+          <code>{String(input.namespace)}</code>
+        </>
+      );
+    case "proposeMemoryIncrease":
+      return (
+        <>
+          raise memory of <code>{String(input.workload)}</code> ({String(input.kind)}) in{" "}
+          <code>{String(input.namespace)}</code> to <code>{String(input.memory)}</code>
+        </>
+      );
+    case "proposeScale":
+      return (
+        <>
+          scale <code>{String(input.workload)}</code> ({String(input.kind)}) in{" "}
+          <code>{String(input.namespace)}</code> to {String(input.replicas)} replicas
+        </>
+      );
+    case "proposeRolloutRestart":
+      return (
+        <>
+          restart rollout <code>{String(input.workload)}</code> ({String(input.kind)}) in{" "}
+          <code>{String(input.namespace)}</code>
+        </>
+      );
+    case "proposeApply":
+      return <>apply manifest in <code>{String(input.namespace || "default")}</code></>;
+    case "proposeDeleteResource":
+      return (
+        <>
+          delete <code>{String(input.kind)}</code>/<code>{String(input.name)}</code>
+          {input.namespace ? (
+            <>
+              {" "}in <code>{String(input.namespace)}</code>
+            </>
+          ) : null}
+        </>
+      );
+    default:
+      return <>approve {toolName}</>;
+  }
+}
+
+// HITL approval card. Rendered for propose* parts only — never grouped away.
+function ApprovalCard({
+  part,
+  deniedEarlier,
+  onResolve,
+}: {
+  part: AnyPart;
+  deniedEarlier: boolean;
+  onResolve: (approved: boolean) => void;
+}) {
+  const toolName = toolNameOf(part);
+  const input = (part.input ?? {}) as Record<string, unknown>;
+
+  // The model streams the tool input token-by-token; keep the card inert until
+  // the arguments are complete so we never show half-written details.
+  if (part.state === "input-streaming") {
+    return (
+      <div className="approval pending" aria-busy="true">
+        <strong>⏳ Approval needed</strong>
+        <div className="approval-reason">
+          <span className="spinner" aria-hidden="true" /> Preparing details, please wait…
+        </div>
+        <div>
+          <button disabled>✅ Approve</button>
+          <button disabled>❌ Deny</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (part.state === "input-available") {
+    if (deniedEarlier) {
+      return <p className="tool muted">❌ Already denied — this change was skipped</p>;
+    }
+    return (
+      <div className="approval">
+        <strong>⚠ Approval needed</strong>
+        <div className="approval-summary">{approvalSummary(toolName, input)}</div>
+        {typeof input.reason === "string" && input.reason && (
+          <div className="approval-reason">{input.reason}</div>
+        )}
+        <div>
+          <button onClick={() => onResolve(true)}>✅ Approve</button>
+          <button onClick={() => onResolve(false)}>❌ Deny</button>
+        </div>
+      </div>
+    );
+  }
+
+  const approved =
+    part.state === "output-available" && (part.output as { approved?: boolean })?.approved;
+  return (
+    <div className={`approval-result ${approved ? "ok" : "no"}`}>
+      {approved ? "✅ Approved" : "❌ Denied"} · {approvalSummary(toolName, input)}
+    </div>
+  );
+}
+
+// A single turn: avatar + bubble. Activity strip is hoisted above the prose so
+// the narrative text stays unbroken.
+function MessageBubble({
+  role,
+  parts,
+  isDeniedObjective,
+  onResolve,
+}: {
+  role: string;
+  parts: AnyPart[];
+  isDeniedObjective: (toolName: string, input: unknown) => boolean;
+  onResolve: (part: AnyPart, approved: boolean) => void;
+}) {
+  const activity = parts.filter(
+    (p) => p.type?.startsWith("tool-") && !p.type.startsWith("tool-propose"),
+  );
+
+  return (
+    <div className={`msg ${role}`}>
+      <span className="avatar" aria-hidden="true">
+        {role === "user" ? "🧑" : "🤖"}
+      </span>
+      <div className="bubble">
+        <ToolActivity parts={activity} />
+        <div className="parts">
+          {parts.map((part, i) => {
+            if (part.type === "text") {
+              return <MarkdownText key={i}>{part.text ?? ""}</MarkdownText>;
+            }
+            if (part.type?.startsWith("tool-propose") && isToolUIPart(part as never)) {
+              const toolName = toolNameOf(part);
+              return (
+                <ApprovalCard
+                  key={i}
+                  part={part}
+                  deniedEarlier={isDeniedObjective(toolName, part.input)}
+                  onResolve={(approved) => onResolve(part, approved)}
+                />
+              );
+            }
+            // Non-approval tool calls are already rendered by ToolActivity.
+            return null;
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
 export function Chat() {
-  const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } = useChat({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
-    // once the human answers a propose tool call, re-send so the agent picks up
-    // the decision and continues the turn
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-    onError: (error) => console.error("[ops-chat] useChat error:", error),
-  });
+  const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } =
+    useChat({
+      transport: new DefaultChatTransport({ api: "/api/chat" }),
+      // once the human answers a propose tool call, re-send so the agent picks up
+      // the decision and continues the turn
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      onError: (error) => console.error("[ops-chat] useChat error:", error),
+    });
   const [input, setInput] = useState("");
+  const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Objectives (changes) the human has already denied, and proposal ids we have
@@ -43,8 +347,13 @@ export function Chat() {
   const deniedKeysRef = useRef<Set<string>>(new Set());
   const autoDeniedIdsRef = useRef<Set<string>>(new Set());
 
+  // Follow the stream only while the user is already near the bottom, so a
+  // manual scroll-up to read history isn't yanked back.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const el = messagesRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
+    if (nearBottom) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // Rebuild the set of denied objectives from history. A denial is scoped to the
@@ -53,11 +362,11 @@ export function Chat() {
     const denied = new Set<string>();
     for (const m of messages) {
       for (const part of m.parts) {
-        const p = part as { type?: string; state?: string; input?: unknown; output?: unknown };
+        const p = part as AnyPart;
         if (!p.type?.startsWith("tool-propose")) continue;
         if (p.state !== "output-available") continue;
         if ((p.output as { approved?: boolean } | undefined)?.approved !== false) continue;
-        const toolName = p.type.slice("tool-".length);
+        const toolName = toolNameOf(p);
         for (const key of objectiveKeys(toolName, (p.input ?? {}) as Record<string, unknown>)) {
           denied.add(key);
         }
@@ -79,11 +388,11 @@ export function Chat() {
     if (deniedKeysRef.current.size === 0) return;
     for (const m of messages) {
       for (const part of m.parts) {
-        const p = part as { type?: string; state?: string; toolCallId?: string; input?: unknown };
+        const p = part as AnyPart;
         if (!p.type?.startsWith("tool-propose")) continue;
         if (p.state !== "input-available" || !p.toolCallId) continue;
         if (autoDeniedIdsRef.current.has(p.toolCallId)) continue;
-        const toolName = p.type.slice("tool-".length);
+        const toolName = toolNameOf(p);
         if (!isDeniedObjective(toolName, p.input)) continue;
         autoDeniedIdsRef.current.add(p.toolCallId);
         addToolOutput({
@@ -95,6 +404,15 @@ export function Chat() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, addToolOutput]);
+
+  const resolveApproval = (part: AnyPart, approved: boolean) => {
+    if (!part.toolCallId) return;
+    addToolOutput({
+      tool: toolNameOf(part),
+      toolCallId: part.toolCallId,
+      output: { approved },
+    });
+  };
 
   const submitInput = () => {
     if (!input.trim()) return;
@@ -122,150 +440,35 @@ export function Chat() {
 
   // While a turn is streaming, show a spinner for the model itself unless a
   // tool line is already showing its own in-progress spinner.
-  const lastParts = messages[messages.length - 1]?.parts ?? [];
-  const lastWorkingTool = lastParts.some(
-    (p) =>
-      isToolUIPart(p) &&
-      (p.state === "input-streaming" || p.state === "input-available"),
-  );
+  const lastParts = (messages[messages.length - 1]?.parts ?? []) as AnyPart[];
+  const lastWorkingTool = lastParts.some((p) => isToolUIPart(p as never) && isRunning(p));
   const showThinking = status === "streaming" && !lastWorkingTool;
 
   return (
     <div className="chat">
-      <div className="messages">
+      <div className="messages" ref={messagesRef}>
         {messages.map((m, mi) => (
-          <div key={`${m.id}-${mi}`} className={`msg ${m.role}`}>
-            <span className="role">{m.role === "user" ? "🧑" : "🤖"}</span>
-            <div className="parts">
-              {m.parts.map((part, i) => {
-                if (part.type === "text")
-                  return <MarkdownText key={i}>{part.text}</MarkdownText>;
-
-                // HITL approval card. The agent called a no-execute propose tool
-                // and is paused waiting for us.
-                if (part.type.startsWith("tool-propose") && isToolUIPart(part)) {
-                  const toolName = getToolName(part) as any;
-                  const toolInput = part.input as any;
-                  // The model streams the tool input token-by-token. Until it is
-                  // fully available (state "input-available") the summary would be
-                  // partial, so keep the card inert — no leaking half-written text,
-                  // no approving incomplete arguments.
-                  if (part.state === "input-streaming") {
-                    return (
-                      <div key={i} className="approval pending" aria-busy="true">
-                        <strong>⏳ Approval needed</strong>
-                        <div style={{ marginTop: 4, opacity: 0.6 }}>
-                          <span className="spinner" aria-hidden="true" /> Preparing details, please wait...
-                        </div>
-                        <div>
-                          <button disabled>✅ Approve</button>
-                          <button disabled>❌ Deny</button>
-                        </div>
-                      </div>
-                    );
-                  }
-                  if (part.state === "input-available") {
-                    // Already denied earlier (possibly via a different tool that
-                    // targets the same change) — never offer it again.
-                    if (isDeniedObjective(toolName, toolInput)) {
-                      return (
-                        <p key={i} className="tool">
-                          ❌ {toolName} · denied earlier, skipped
-                        </p>
-                      );
-                    }
-                    const renderSummary = () => {
-                      if (toolName === "proposeDeletion") return <>delete pod <code>{toolInput?.pod}</code> in <code>{toolInput?.namespace}</code></>;
-                      if (toolName === "proposeMemoryIncrease") return <>raise memory of <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.memory}</code></>;
-                      if (toolName === "proposeScale") return <>scale <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code> to <code>{toolInput?.replicas}</code> replicas</>;
-                      if (toolName === "proposeRolloutRestart") return <>restart rollout <code>{toolInput?.workload}</code> ({toolInput?.kind}) in <code>{toolInput?.namespace}</code></>;
-                      if (toolName === "proposeApply") return <>apply manifest in <code>{toolInput?.namespace || "default"}</code></>;
-                      if (toolName === "proposeDeleteResource") return <>delete <code>{toolInput?.kind}</code>/<code>{toolInput?.name}</code> {toolInput?.namespace ? <>in <code>{toolInput?.namespace}</code></> : null}</>;
-                      return <>approve {toolName}</>;
-                    };
-                    return (
-                      <div key={i} className="approval">
-                        <strong>⚠ Approval needed</strong>
-                        <div style={{ marginTop: 4 }}>{renderSummary()}</div>
-                        {toolInput?.reason && <em> — {toolInput.reason}</em>}
-                        <div>
-                          <button
-                            onClick={() =>
-                              addToolOutput({
-                                tool: toolName,
-                                toolCallId: part.toolCallId,
-                                output: { approved: true },
-                              })
-                            }
-                          >
-                            ✅ Approve
-                          </button>
-                          <button
-                            onClick={() =>
-                              addToolOutput({
-                                tool: toolName,
-                                toolCallId: part.toolCallId,
-                                output: { approved: false },
-                              })
-                            }
-                          >
-                            ❌ Deny
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-                  const approved =
-                    part.state === "output-available" &&
-                    (part.output as { approved?: boolean })?.approved;
-                  return (
-                    <p key={i} className="tool">
-                      {approved ? "✅ approved" : "❌ denied"}
-                    </p>
-                  );
-                }
-
-                // Show tool activity (read-only wire + the executed mutations)
-                if (isToolUIPart(part)) {
-                  const name = getToolName(part);
-                  const isMut = name === "deletePod" || name === "setMemoryLimit";
-                  const inProgress =
-                    part.state === "input-streaming" || part.state === "input-available";
-                  return (
-                    <p
-                      key={i}
-                      className={`tool${isMut ? " mut" : ""}`}
-                    >
-                      {inProgress ? (
-                        <>
-                          <span className="spinner" aria-hidden="true" /> {name} · running…
-                        </>
-                      ) : (
-                        <>
-                          {part.state === "output-error" ? "❌" : "🔧"} {name} · {part.state}
-                          {part.state === "output-error" && (
-                            <span> — {(part as { errorText?: string }).errorText}</span>
-                          )}
-                        </>
-                      )}
-                    </p>
-                  );
-                }
-                return null;
-              })}
-            </div>
-          </div>
+          <MessageBubble
+            key={`${m.id}-${mi}`}
+            role={m.role}
+            parts={m.parts as AnyPart[]}
+            isDeniedObjective={isDeniedObjective}
+            onResolve={resolveApproval}
+          />
         ))}
         {showThinking && (
           <div className="msg assistant">
-            <span className="role">🤖</span>
-            <div className="parts">
+            <span className="avatar" aria-hidden="true">
+              🤖
+            </span>
+            <div className="bubble">
               <p className="tool working">
                 <span className="spinner" aria-hidden="true" /> thinking…
               </p>
             </div>
           </div>
         )}
+        <div ref={messagesEndRef} />
       </div>
 
       {error && (
@@ -303,7 +506,6 @@ export function Chat() {
           🗑️ Clear
         </button>
       </form>
-      <div ref={messagesEndRef} />
     </div>
   );
 }

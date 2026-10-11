@@ -5,17 +5,69 @@ body {
   margin: 0; padding: 32px 16px; background: #f8fafc; color: #0f172a;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-main { max-width: 760px; margin: 0 auto; }
+main { max-width: 820px; margin: 0 auto; }
 h1 { letter-spacing: -0.02em; margin-bottom: 4px; }
 main > p { color: #64748b; margin-top: 0; }
 
 .chat { background: #fff; border: 2px solid #16a34a; border-radius: 14px;
-  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.12); padding: 16px; }
-.messages { min-height: 320px; display: flex; flex-direction: column; gap: 10px; }
-.msg { display: flex; gap: 8px; }
-.msg .role { flex: none; }
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.12); padding: 16px;
+  display: flex; flex-direction: column; }
+
+/* ── Transcript ──
+   The message pane scrolls on its own so the composer stays put; generous
+   vertical rhythm makes turn boundaries obvious. */
+.messages { display: flex; flex-direction: column; gap: 20px;
+  min-height: 320px; max-height: min(68vh, 640px); overflow-y: auto;
+  padding: 4px 6px 8px 2px; }
+.msg { display: flex; gap: 10px; align-items: flex-start; }
+.msg .avatar { flex: none; width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; background: #f1f5f9; font-size: 15px; }
+.msg .bubble { min-width: 0; max-width: 86%; }
+
+/* User turns: right-aligned, tinted bubble. Assistant turns: plain, so the
+   prose (and kubectl tables) get the full width. */
+.msg.user { flex-direction: row-reverse; }
+.msg.user .bubble { background: #dcfce7; border: 1px solid #bbf7d0;
+  border-radius: 14px 14px 4px 14px; padding: 8px 12px; }
+.msg.assistant .bubble { padding-top: 2px; }
+
 .msg p { margin: 2px 0; white-space: pre-wrap; }
 .msg .tool { color: #64748b; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.msg .tool.mut { color: #b91c1c; font-weight: 700; }
+.msg .tool.working { color: #16a34a; font-weight: 600; }
+.msg .tool.muted { color: #94a3b8; }
+
+/* ── Collapsed tool activity ──
+   Every read/mutate call in a turn folds into one summary pill; expanding it
+   reveals the per-tool detail (name, friendly label, raw output/error). */
+.activity { margin: 0 0 8px; }
+.activity-toggle { display: inline-flex; align-items: center; gap: 7px;
+  max-width: 100%; background: #f8fafc; border: 1px solid #e2e8f0;
+  border-radius: 999px; padding: 4px 12px 4px 10px; font: inherit;
+  font-size: 12.5px; color: #64748b; cursor: pointer; }
+.activity-toggle:hover { background: #f1f5f9; }
+.activity .chev { color: #94a3b8; font-size: 11px; }
+.activity-count { font-weight: 700; color: #475569; }
+.activity-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.activity-list { list-style: none; margin: 8px 0 0; padding: 0 0 0 12px;
+  border-left: 2px solid #e2e8f0; }
+.activity-item { padding: 6px 0; }
+.activity-item + .activity-item { border-top: 1px dashed #eef2f7; }
+.activity-item-head { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.activity-item-name { color: #334155; font-weight: 600; }
+.activity-item-tool { font-size: 11px; color: #94a3b8; background: #f1f5f9;
+  border: 1px solid #e2e8f0; border-radius: 5px; padding: 0 5px;
+  font-family: ui-monospace, Menlo, monospace; }
+.activity-item-hint { color: #94a3b8; font-size: 12px; padding-left: 20px; }
+.activity-item-detail { max-height: 200px; overflow: auto; margin: 6px 0 0 20px;
+  background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 8px 10px;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre;
+  }
+.activity-item-detail.error { background: #fef2f2; color: #7f1d1d; white-space: pre-wrap; }
+.activity-icon { color: #16a34a; font-weight: 700; }
+.activity-icon.fail { color: #dc2626; }
+.activity-item.fail .activity-item-name { color: #b91c1c; }
 
 /* Rendered markdown from assistant/user messages */
 .markdown { overflow-wrap: anywhere; }
@@ -37,31 +89,38 @@ main > p { color: #64748b; margin-top: 0; }
   padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
 .markdown pre code { background: transparent; border: none; padding: 0;
   color: inherit; font-size: 0.85em; }
-.markdown table { border-collapse: collapse; margin: 8px 0; width: 100%;
+.markdown .table-wrap { overflow-x: auto; margin: 8px 0; }
+.markdown table { border-collapse: collapse; margin: 0; width: 100%;
   font-size: 0.9em; }
 .markdown th, .markdown td { border: 1px solid #cbd5e1; padding: 5px 9px;
-  text-align: left; }
+  text-align: left; white-space: nowrap; }
 .markdown th { background: #f1f5f9; font-weight: 700; }
 .markdown tr:nth-child(even) td { background: #f8fafc; }
 .markdown blockquote { border-left: 3px solid #cbd5e1; margin: 8px 0;
   padding: 2px 12px; color: #475569; }
 .markdown hr { border: none; border-top: 1px solid #e2e8f0; margin: 12px 0; }
-.msg .tool.mut { color: #b91c1c; font-weight: 700; }
-.msg .tool.working { color: #16a34a; font-weight: 600; }
 
 .spinner { display: inline-block; width: 12px; height: 12px;
   border: 2px solid #cbd5e1; border-top-color: #16a34a; border-radius: 50%;
   animation: spin 0.7s linear infinite; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── HITL approval card ──
+   Deliberately louder than any message: this is the one place the human acts. */
 .approval { border: 2px solid #7c3aed; border-radius: 10px; padding: 10px 12px;
-  background: #f5f3ff; margin: 6px 0; }
+  background: #f5f3ff; margin: 8px 0; }
+.approval-summary { margin-top: 4px; }
+.approval-reason { margin-top: 4px; color: #6d28d9; font-size: 13px; font-style: italic; }
 .approval button { margin: 8px 8px 0 0; padding: 6px 14px; border: none;
   border-radius: 999px; font-weight: 700; cursor: pointer; }
 .approval button:first-of-type { background: #d1fae5; color: #065f46; }
 .approval button:last-of-type { background: #fee2e2; color: #7f1d1d; }
 .approval.pending { border-color: #a1a1aa; background: #f4f4f5; }
 .approval button[disabled] { opacity: 0.45; cursor: not-allowed; }
+.approval-result { font-size: 13px; padding: 6px 10px; border-radius: 8px;
+  margin: 6px 0; display: inline-block; }
+.approval-result.ok { background: #ecfdf5; color: #065f46; }
+.approval-result.no { background: #fef2f2; color: #7f1d1d; }
 
 .error-banner { display: flex; justify-content: space-between; align-items: center;
   gap: 8px; border: 2px solid #dc2626; background: #fef2f2; color: #7f1d1d;
@@ -69,7 +128,8 @@ main > p { color: #64748b; margin-top: 0; }
 .error-banner button { border: none; background: transparent; color: #7f1d1d;
   font-weight: 700; cursor: pointer; }
 
-form { display: flex; align-items: flex-end; gap: 8px; margin-top: 14px; }
+form { display: flex; align-items: flex-end; gap: 8px; margin-top: 14px;
+  border-top: 1px solid #eef2f7; padding-top: 14px; }
 form textarea { flex: 1; padding: 10px 14px; border: 1.5px solid #cbd5e1;
   border-radius: 18px; font: inherit; line-height: 1.4; resize: none;
   min-height: 42px; max-height: 220px; overflow-y: auto; }
