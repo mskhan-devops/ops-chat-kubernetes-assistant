@@ -70,33 +70,6 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
   // proposeApply (and vice-versa).
   const deniedKeys = new Set<string>();
 
-  for (const message of messages) {
-    for (const part of message.parts ?? []) {
-      const p = part as {
-        type?: string;
-        state?: string;
-        toolCallId?: string;
-        input?: unknown;
-        output?: unknown;
-      };
-      if (!p.type?.startsWith("tool-propose")) continue;
-      if (p.state !== "output-available") continue;
-      const toolName = p.type.slice("tool-".length);
-      const input = (p.input ?? {}) as Record<string, unknown>;
-      const approved = (p.output as { approved?: boolean } | undefined)?.approved === true;
-      if (!approved) {
-        for (const key of objectiveKeys(toolName, input)) deniedKeys.add(key);
-      }
-      proposals.push({
-        id: p.toolCallId ?? "",
-        toolName,
-        input,
-        approved,
-        consumed: false,
-      });
-    }
-  }
-
   const findLatest = (mutation: string, args: Record<string, unknown>) => {
     const proposalName = PROPOSAL_FOR[mutation];
     for (let i = proposals.length - 1; i >= 0; i--) {
@@ -108,16 +81,61 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
     return undefined;
   };
 
-  // A mutation already present in the history (output-available) means its
-  // matching approval was spent — so it can't be silently reused on a later
-  // turn without a fresh proposal.
+  // Like findLatest, but only returns an approved proposal that hasn't been
+  // spent yet — used to attribute a past mutation to the approval that funded
+  // it.
+  const findSpendable = (mutation: string, args: Record<string, unknown>) => {
+    const proposalName = PROPOSAL_FOR[mutation];
+    for (let i = proposals.length - 1; i >= 0; i--) {
+      const proposal = proposals[i];
+      if (proposal.toolName !== proposalName) continue;
+      if (!proposal.approved || proposal.consumed) continue;
+      if (!targetsMatch(mutation, proposal.input, args)) continue;
+      return proposal;
+    }
+    return undefined;
+  };
+
+  // Rebuild state in chronological order in a SINGLE pass. Because `proposals`
+  // only contains proposals seen so far, a mutation can only consume a proposal
+  // that was made *before* it. (Searching the full list let a past applyManifest
+  // eat a proposal created later, which left every subsequent apply blocked
+  // with "approval already used".)
   for (const message of messages) {
     for (const part of message.parts ?? []) {
-      const p = part as { type?: string; state?: string; input?: unknown };
+      const p = part as {
+        type?: string;
+        state?: string;
+        toolCallId?: string;
+        input?: unknown;
+        output?: unknown;
+      };
       if (!p.type?.startsWith("tool-")) continue;
+
+      // Proposals resolved by the human (via addToolOutput).
+      if (p.type.startsWith("tool-propose")) {
+        if (p.state !== "output-available") continue;
+        const toolName = p.type.slice("tool-".length);
+        const input = (p.input ?? {}) as Record<string, unknown>;
+        const approved = (p.output as { approved?: boolean } | undefined)?.approved === true;
+        if (!approved) {
+          for (const key of objectiveKeys(toolName, input)) deniedKeys.add(key);
+        }
+        proposals.push({
+          id: p.toolCallId ?? "",
+          toolName,
+          input,
+          approved,
+          consumed: false,
+        });
+        continue;
+      }
+
+      // A mutation that already ran means its matching approval was spent, so it
+      // can't be reused later without a fresh proposal.
       const mutation = p.type.slice("tool-".length);
       if (!PROPOSAL_FOR[mutation] || p.state !== "output-available") continue;
-      const spent = findLatest(mutation, (p.input ?? {}) as Record<string, unknown>);
+      const spent = findSpendable(mutation, (p.input ?? {}) as Record<string, unknown>);
       if (spent) spent.consumed = true;
     }
   }
