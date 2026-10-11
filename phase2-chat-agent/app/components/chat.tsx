@@ -456,10 +456,42 @@ export function Chat() {
   const messagesRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // User-draggable chat width. null = let CSS decide (820px default).
+  const chatRef = useRef<HTMLDivElement>(null);
+  const [chatWidth, setChatWidth] = useState<number | null>(null);
   // Objectives (changes) the human has already denied, and proposal ids we have
   // auto-resolved so we don't dispatch the same denial twice.
   const deniedKeysRef = useRef<Set<string>>(new Set());
   const autoDeniedIdsRef = useRef<Set<string>>(new Set());
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startW = chatRef.current?.getBoundingClientRect().width ?? 820;
+
+    const move = (ev: PointerEvent) => {
+      const vw = window.innerWidth;
+      const maxW = Math.min(1400, vw - 48);
+      setChatWidth(Math.min(maxW, Math.max(360, startW + (ev.clientX - startX))));
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
+  };
+
+  // Share the width with the page header via a CSS variable so the title stays
+  // aligned with the chat box at every dragged size.
+  useEffect(() => {
+    const px = chatWidth === null ? 820 : chatWidth;
+    document.documentElement.style.setProperty("--chat-width", `${px}px`);
+  }, [chatWidth]);
 
   // Follow the stream only while the user is already near the bottom, so a
   // manual scroll-up to read history isn't yanked back.
@@ -515,6 +547,12 @@ export function Chat() {
   // the denial still stands.
   useEffect(() => {
     if (deniedKeysRef.current.size === 0) return;
+    // Never resolve proposals while a request is in flight: the SDK's
+    // auto-resend chains state updates off addToolOutput, and doing that from
+    // inside this messages-driven effect can cascade into a synchronous
+    // update loop ("Maximum update depth exceeded"). Denials only apply to
+    // proposals the model is parked on, i.e. status is "ready".
+    if (status === "streaming" || status === "submitted") return;
     for (const m of messages) {
       for (const part of m.parts) {
         const p = part as AnyPart;
@@ -524,15 +562,16 @@ export function Chat() {
         const toolName = toolNameOf(p);
         if (!isDeniedObjective(toolName, p.input)) continue;
         autoDeniedIdsRef.current.add(p.toolCallId);
-        addToolOutput({
-          tool: toolName,
-          toolCallId: p.toolCallId,
-          output: { approved: false },
-        });
+        // Defer out of the effect flush so the auto-resend's state updates land
+        // in a clean commit, not nested inside this one.
+        const id = p.toolCallId;
+        setTimeout(() => {
+          addToolOutput({ tool: toolName, toolCallId: id, output: { approved: false } });
+        }, 0);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, addToolOutput]);
+  }, [messages, addToolOutput, status]);
 
   const resolveApproval = (part: AnyPart, approved: boolean) => {
     if (!part.toolCallId) return;
@@ -581,7 +620,9 @@ export function Chat() {
   );
 
   return (
-    <div className="chat">
+    <div className="chat" ref={chatRef}>
+      <div className="chat-resize" role="separator" aria-orientation="vertical"
+        aria-label="Resize chat width" onPointerDown={startResize} />
       {hasActivity && (
         <div className="chat-toolbar">
           <button
