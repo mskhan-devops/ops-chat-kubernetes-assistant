@@ -16,7 +16,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -38,6 +38,13 @@ type AnyPart = {
   errorText?: string;
   text?: string;
 };
+
+// Auto-retry after a failed request: up to 3 attempts with exponential backoff.
+// We retry on *any* error (transient fetch/network failures as well as server
+// hiccups), then hand over to a manual "Retry" button if the budget is spent.
+const AUTO_RETRY_LIMIT = 3;
+const AUTO_RETRY_BASE_DELAY = 600;
+const AUTO_RETRY_MAX_DELAY = 8000;
 
 // Turn the model-facing tool names into something a human reads at a glance.
 const TOOL_LABELS: Record<string, string> = {
@@ -327,14 +334,20 @@ function approvalSummary(toolName: string, input: Record<string, unknown>) {
 function ApprovalCard({
   part,
   deniedEarlier,
+  busy,
   onResolve,
+  onOther,
 }: {
   part: AnyPart;
   deniedEarlier: boolean;
+  busy: boolean;
   onResolve: (approved: boolean) => void;
+  onOther: (text: string) => void;
 }) {
   const toolName = toolNameOf(part);
   const input = (part.input ?? {}) as Record<string, unknown>;
+  const [showOther, setShowOther] = useState(false);
+  const [otherText, setOtherText] = useState("");
 
   // The model streams the tool input token-by-token; keep the card inert until
   // the arguments are complete so we never show half-written details.
@@ -345,9 +358,10 @@ function ApprovalCard({
         <div className="approval-reason">
           <span className="spinner" aria-hidden="true" /> Preparing details, please wait…
         </div>
-        <div>
-          <button disabled>✅ Approve</button>
-          <button disabled>❌ Deny</button>
+        <div className="approval-actions">
+          <button className="approve-btn" disabled>✅ Approve</button>
+          <button className="deny-btn" disabled>❌ Deny</button>
+          <button className="other-btn" disabled>💬 Something else on mind?</button>
         </div>
       </div>
     );
@@ -364,10 +378,58 @@ function ApprovalCard({
         {typeof input.reason === "string" && input.reason && (
           <div className="approval-reason">{input.reason}</div>
         )}
-        <div>
-          <button onClick={() => onResolve(true)}>✅ Approve</button>
-          <button onClick={() => onResolve(false)}>❌ Deny</button>
+        <div className="approval-actions">
+          <button className="approve-btn" disabled={busy} onClick={() => onResolve(true)}>✅ Approve</button>
+          <button className="deny-btn" disabled={busy} onClick={() => onResolve(false)}>❌ Deny</button>
+          <button
+            className="other-btn"
+            disabled={busy}
+            aria-expanded={showOther}
+            onClick={() => setShowOther((s) => !s)}
+          >
+            💬 Something else on mind?
+          </button>
         </div>
+        {showOther && (
+          <div className="approval-other">
+            <textarea
+              autoFocus
+              value={otherText}
+              onChange={(e) => setOtherText(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends the redirect; Shift+Enter inserts a newline.
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (otherText.trim() && !busy) onOther(otherText.trim());
+                }
+              }}
+              rows={2}
+              placeholder={
+                'What would you prefer instead — e.g. "don\u2019t delete it, just bump the memory"'
+              }
+            />
+            <div className="approval-other-actions">
+              <button
+                className="other-btn"
+                disabled={busy || !otherText.trim()}
+                onClick={() => onOther(otherText.trim())}
+              >
+                Send
+              </button>
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={busy}
+                onClick={() => {
+                  setShowOther(false);
+                  setOtherText("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -390,7 +452,9 @@ function MessageBubble({
   activityOpen,
   onToggleActivity,
   isDeniedObjective,
+  busy,
   onResolve,
+  onOther,
   copyEnabled,
   commandOf,
 }: {
@@ -400,7 +464,9 @@ function MessageBubble({
   activityOpen: boolean;
   onToggleActivity: () => void;
   isDeniedObjective: (toolName: string, input: unknown) => boolean;
+  busy: boolean;
   onResolve: (part: AnyPart, approved: boolean) => void;
+  onOther: (part: AnyPart, text: string) => void;
   copyEnabled: boolean;
   commandOf: (part: AnyPart) => string;
 }) {
@@ -432,7 +498,9 @@ function MessageBubble({
                   key={i}
                   part={part}
                   deniedEarlier={isDeniedObjective(toolName, part.input)}
+                  busy={busy}
                   onResolve={(approved) => onResolve(part, approved)}
+                  onOther={(text) => onOther(part, text)}
                 />
               );
             }
@@ -451,12 +519,40 @@ function MessageBubble({
 }
 
 export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: string; kubeContext?: string }) {
-  const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError } =
+  // Suppress the propose-tool auto-resend for a SINGLE addToolOutput. Used by
+  // "Something else on mind?" so the custom user message — not the bare denial —
+  // is what restarts the agent loop.
+  const suppressAutoSendRef = useRef(false);
+  // Auto-retry bookkeeping: how many consecutive failures we've absorbed, the
+  // pending retry timer, and a small banner state shown while retrying.
+  const autoRetryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryState, setRetryState] = useState<{
+    attempt: number;
+    max: number;
+    exhausted: boolean;
+  } | null>(null);
+
+  const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError, regenerate } =
     useChat({
       transport: new DefaultChatTransport({ api: "/api/chat" }),
       // once the human answers a propose tool call, re-send so the agent picks up
       // the decision and continues the turn
-      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+      sendAutomaticallyWhen: (options) => {
+        if (suppressAutoSendRef.current) {
+          suppressAutoSendRef.current = false;
+          return false;
+        }
+        return lastAssistantMessageIsCompleteWithToolCalls(options);
+      },
+      // Give back the auto-retry budget only when a request genuinely succeeds;
+      // errors/aborts leave it spent so a bad stretch can't loop forever.
+      onFinish: ({ isError, isAbort }) => {
+        if (!isError && !isAbort) {
+          autoRetryCountRef.current = 0;
+          setRetryState(null);
+        }
+      },
       // Pace the published messages snapshot. Without this, useChat's
       // useSyncExternalStore re-reads a fresh messages array on every stream
       // chunk, and when many chunks land faster than React can commit (fast
@@ -467,6 +563,9 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
       experimental_throttle: 50,
       onError: (error) => console.error("[ops-chat] useChat error:", error),
     });
+  // JS-side snapshot of the latest messages, for use inside the retry path
+  // (where the closure may be slightly older than the last streamed chunk).
+  const latestMessagesRef = useRef(messages);
   const commandOf = (part: AnyPart) =>
     formatCommand(toolNameOf(part), (part.input ?? {}) as Record<string, unknown>, kubeBin, kubeContext);
   const [input, setInput] = useState("");
@@ -604,8 +703,110 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     });
   };
 
+  // "Something else on mind?": the user doesn't approve/deny but wants to steer
+  // the agent with their own words. We mark the pending proposal as denied (so
+  // nothing executes and it won't be re-offered) and hand the human's text over
+  // as a normal user message. The auto-resend is suppressed for the denial so
+  // it doesn't race the user message.
+  const resolveOther = async (part: AnyPart, text: string) => {
+    if (!part.toolCallId || !text.trim()) return;
+    suppressAutoSendRef.current = true;
+    try {
+      await addToolOutput({
+        tool: toolNameOf(part),
+        toolCallId: part.toolCallId,
+        output: { approved: false },
+      });
+      cancelRetry();
+      await sendMessage({ text });
+    } catch (err) {
+      console.error("[ops-chat] something-else flow failed:", err);
+    } finally {
+      suppressAutoSendRef.current = false;
+    }
+  };
+
+  // Cancel a pending auto-retry (e.g. the user typed something new) and clear
+  // its budget, since a fresh request supersedes the failed one.
+  const cancelRetry = () => {
+    if (retryTimerRef.current != null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    autoRetryCountRef.current = 0;
+    setRetryState(null);
+  };
+
+  // Pick up after a failure without starting over. The server is stateless and
+  // gets the whole history on every POST, so we trim the *current* assistant
+  // message back to its last completed step and resend it — the model continues
+  // from there, and everything already accomplished (reads, earlier steps) is
+  // preserved. If there is no reusable partial turn, fall back to re-delivering
+  // the last user request.
+  const continueAfterError = useCallback(() => {
+    const msgs = latestMessagesRef.current;
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === "assistant") {
+      const parts = last.parts as AnyPart[];
+      // Keep everything before the last step-start: that boundary marks the
+      // step that was mid-flight when the request died, so its parts may be
+      // half-written and must be dropped. Completed earlier steps stay.
+      const lastStepStart = parts.findLastIndex((p) => p.type === "step-start");
+      const kept = lastStepStart > 0 ? parts.slice(0, lastStepStart) : [];
+      if (kept.length > 0) {
+        setMessages([
+          ...msgs.slice(0, -1),
+          { ...last, parts: kept } as (typeof msgs)[number],
+        ]);
+        void sendMessage().catch((e) => console.error("[ops-chat] resume-after-error failed:", e));
+        return;
+      }
+    }
+    void regenerate().catch((e) => console.error("[ops-chat] retry regenerate failed:", e));
+  }, [sendMessage, setMessages, regenerate]);
+
+  const manualRetry = () => {
+    cancelRetry();
+    continueAfterError();
+  };
+
+  // Keep a fresh copy of messages for continueAfterError (which is memoized and
+  // therefore doesn't see the latest closure values).
+  useEffect(() => {
+    latestMessagesRef.current = messages;
+  }, [messages]);
+
+  // Auto-retry after any failure: a few attempts, exponential backoff. The
+  // budget is only reset by a successful onFinish, so a broken sequence can't
+  // loop forever — it eventually surfaces the error banner with a manual
+  // "Retry" button.
+  useEffect(() => {
+    if (status !== "error" || !error) return;
+    if (retryTimerRef.current != null) return; // already scheduled
+    if (autoRetryCountRef.current >= AUTO_RETRY_LIMIT) {
+      setRetryState({ attempt: AUTO_RETRY_LIMIT, max: AUTO_RETRY_LIMIT, exhausted: true });
+      return;
+    }
+    autoRetryCountRef.current += 1;
+    const attempt = autoRetryCountRef.current;
+    setRetryState({ attempt, max: AUTO_RETRY_LIMIT, exhausted: false });
+    const delay = Math.min(AUTO_RETRY_MAX_DELAY, AUTO_RETRY_BASE_DELAY * 2 ** (attempt - 1));
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      continueAfterError();
+    }, delay);
+    return () => {
+      if (retryTimerRef.current != null) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, error, continueAfterError]);
+
   const submitInput = () => {
     if (!input.trim()) return;
+    cancelRetry();
     sendMessage({ text: input });
     setInput("");
     if (inputRef.current) {
@@ -633,6 +834,8 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
   const lastParts = (messages[messages.length - 1]?.parts ?? []) as AnyPart[];
   const lastWorkingTool = lastParts.some((p) => isToolUIPart(p as never) && isRunning(p));
   const showThinking = status === "streaming" && !lastWorkingTool;
+  // A request is in flight; approval buttons must be inert until it settles.
+  const busy = status === "streaming" || status === "submitted";
 
   // Only offer the global toggle once there is something to collapse.
   const hasActivity = messages.some((m) =>
@@ -667,7 +870,9 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
             activityOpen={activityOpen}
             onToggleActivity={() => setActivityOpen((o) => !o)}
             isDeniedObjective={isDeniedObjective}
+            busy={busy}
             onResolve={resolveApproval}
+            onOther={resolveOther}
             copyEnabled={!(status === "streaming" || status === "submitted") || mi !== messages.length - 1}
             commandOf={commandOf}
           />
@@ -689,10 +894,25 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
 
       {error && (
         <div className="error-banner" role="alert">
-          <span>⚠ {error.message || "The request failed."}</span>
-          <button type="button" onClick={() => clearError()}>
-            ✕
-          </button>
+          <span>
+            {retryState && !retryState.exhausted
+              ? `⚠ ${error.message || "The request failed."} — retrying (${retryState.attempt}/${retryState.max})…`
+              : `⚠ ${error.message || "The request failed."}`}
+          </span>
+          <div className="error-banner-actions">
+            <button type="button" className="retry-btn" onClick={manualRetry}>
+              ↻ Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                cancelRetry();
+                clearError();
+              }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
       )}
 

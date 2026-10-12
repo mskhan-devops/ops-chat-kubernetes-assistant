@@ -44,7 +44,14 @@ export async function POST(req: Request) {
   const result = streamText({
     model: chatModel,
     system: SYSTEM_PROMPT,
-    messages: convertToModelMessages(messages),
+    // The client may resend a history that ends in an in-flight/trimmed
+    // assistant turn after an auto-retry; ignoreIncompleteToolCalls drops any
+    // half-written tool input so the resend converts cleanly instead of leaving
+    // a dangling tool call with no result.
+    messages: convertToModelMessages(messages, {
+      tools,
+      ignoreIncompleteToolCalls: true,
+    }),
     tools,
     stopWhen: stepCountIs(MAX_STEPS),
     onError: ({ error }) => {

@@ -161,10 +161,23 @@ main > p { color: #64748b; margin-top: 0; }
   background: #f5f3ff; margin: 8px 0; }
 .approval-summary { margin-top: 4px; }
 .approval-reason { margin-top: 4px; color: #6d28d9; font-size: 13px; font-style: italic; }
-.approval button { margin: 8px 8px 0 0; padding: 6px 14px; border: none;
+.approval-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: 8px; }
+.approval-actions button { margin: 0; padding: 6px 14px; border: none;
   border-radius: 999px; font-weight: 700; cursor: pointer; }
-.approval button:first-of-type { background: #d1fae5; color: #065f46; }
-.approval button:last-of-type { background: #fee2e2; color: #7f1d1d; }
+.approval-actions .approve-btn { background: #d1fae5; color: #065f46; }
+.approval-actions .deny-btn { background: #fee2e2; color: #7f1d1d; }
+.approval-actions .other-btn { background: #ede9fe; color: #5b21b6; }
+.approval-other { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.approval-other textarea { border: 1.5px solid #c4b5fd; border-radius: 10px;
+  padding: 8px 10px; font: inherit; line-height: 1.4; resize: vertical;
+  min-height: 44px; }
+.approval-other-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.approval-other-actions button { margin: 0; padding: 6px 14px; border: none;
+  border-radius: 999px; font-weight: 700; cursor: pointer; }
+.approval-other-actions .other-btn { background: #ede9fe; color: #5b21b6; }
+.approval-other-actions .ghost-btn { background: #f8fafc; border: 1px solid #e2e8f0;
+  color: #334155; }
 .approval.pending { border-color: #a1a1aa; background: #f4f4f5; }
 .approval button[disabled] { opacity: 0.45; cursor: not-allowed; }
 .approval-result { font-size: 13px; padding: 6px 10px; border-radius: 8px;
@@ -175,8 +188,11 @@ main > p { color: #64748b; margin-top: 0; }
 .error-banner { display: flex; justify-content: space-between; align-items: center;
   gap: 8px; border: 2px solid #dc2626; background: #fef2f2; color: #7f1d1d;
   border-radius: 10px; padding: 8px 12px; margin: 12px 0; font-size: 14px; }
+.error-banner-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 .error-banner button { border: none; background: transparent; color: #7f1d1d;
-  font-weight: 700; cursor: pointer; }
+  font-weight: 700; cursor: pointer; padding: 4px 10px; border-radius: 999px; }
+.error-banner button:hover { background: #fee2e2; }
+.error-banner .retry-btn { background: #fff; border: 1px solid #fecaca; }
 
 form { display: flex; align-items: flex-end; gap: 8px; margin-top: 14px;
   border-top: 1px solid #eef2f7; padding-top: 14px; }
