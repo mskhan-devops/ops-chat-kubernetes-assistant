@@ -194,9 +194,20 @@ function ToolRow({ part, command }: { part: AnyPart; command: string }) {
   const running = isRunning(part);
   const failed = part.state === "output-error";
   const output = part.output;
+  // While the server-side execute runs — kubectl can block for minutes on a
+  // rollout — show a human-readable "still working" hint instead of a bare
+  // "running…" so the UI never looks frozen.
+  const hint = part.state === "input-streaming"
+    ? "preparing…"
+    : command
+      ? "Executing command…"
+      : "Waiting for results…";
+  // The exact command is only useful once the model has finished writing it
+  // (i.e. during execution), so show it while running, not while typing it.
+  const showCmd = command && (!running || part.state !== "input-streaming");
 
   return (
-    <li className={`activity-item${failed ? " fail" : ""}`}>
+    <li className={`activity-item${running ? " working" : ""}${failed ? " fail" : ""}`}>
       <div className="activity-item-head">
         {running ? (
           <span className="spinner" aria-hidden="true" />
@@ -208,7 +219,7 @@ function ToolRow({ part, command }: { part: AnyPart; command: string }) {
         <span className="activity-item-name">{labelFor(name)}</span>
         <code className="activity-item-tool">{name}</code>
       </div>
-      {command && !running && (
+      {showCmd && (
         <div className="activity-cmd">
           <span className="activity-cmd-label">cmd</span>
           <code>{command}</code>
@@ -220,7 +231,11 @@ function ToolRow({ part, command }: { part: AnyPart; command: string }) {
       {!failed && !running && output !== undefined && output !== "" && (
         <pre className="activity-item-detail">{String(output)}</pre>
       )}
-      {running && <div className="activity-item-hint">running…</div>}
+      {running && (
+        <div className="activity-item-hint">
+          <span className="activity-item-hint-dot" aria-hidden="true" /> {hint}
+        </div>
+      )}
     </li>
   );
 }
@@ -248,6 +263,18 @@ function ToolActivity({
     labels.slice(0, 3).join(", ") +
     (labels.length > 3 ? ` +${labels.length - 3} more` : "");
 
+  // Which step is mid-flight right now, in human terms? This is shown on the
+  // (possibly collapsed) toggle so the user always sees what the agent is doing
+  // during a slow execute (e.g. kubectl rollout waiting), not just a spinner.
+  const active = parts.filter(isRunning);
+  const activeLabels = Array.from(new Set(active.map((p) => labelFor(toolNameOf(p)))));
+  const hasCommand = active.some((p) => commandOf(p));
+  const activeStatus = active.every((p) => p.state === "input-streaming")
+    ? "preparing…"
+    : hasCommand
+      ? "Executing command…"
+      : "Waiting for results…";
+
   return (
     <div className={`activity${open ? " open" : ""}`}>
       <button
@@ -271,6 +298,15 @@ function ToolActivity({
         </span>
         <span className="activity-summary">· {summary}</span>
       </button>
+      {running && activeLabels.length > 0 && (
+        <div className="activity-now" role="status" aria-live="polite">
+          <span className="activity-item-hint-dot" aria-hidden="true" />
+          <span className="activity-now-label">working</span>
+          <span className="activity-now-detail">
+            {activeLabels.join(", ")} — {activeStatus}
+          </span>
+        </div>
+      )}
       {open && (
         <ul className="activity-list">
           {parts.map((p, i) => (
@@ -831,7 +867,7 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     // Enter sends; Shift+Enter inserts a newline.
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      if (status !== "streaming") submitInput();
+      if (status !== "streaming" && status !== "submitted") submitInput();
     }
   };
 
@@ -842,11 +878,22 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   };
 
-  // While a turn is streaming, show a spinner for the model itself unless a
-  // tool line is already showing its own in-progress spinner.
+  // While a turn is running, show a spinner for the model itself unless a tool
+  // line is already showing its own in-progress spinner. This covers BOTH the
+  // "submitted" state (request posted, waiting for the first token — the slow
+  // part with a local model) and "streaming".
   const lastParts = (messages[messages.length - 1]?.parts ?? []) as AnyPart[];
   const lastWorkingTool = lastParts.some((p) => isToolUIPart(p as never) && isRunning(p));
-  const showThinking = status === "streaming" && !lastWorkingTool;
+  // Don't keep a "thinking…" bubble pinned below an answer that is already
+  // streaming — that made short post-action summaries feel like the agent was
+  // stuck "thinking" the whole time. The bubble is only for real gaps: waiting
+  // for the first token, or waiting for the model between tool calls.
+  const lastPartShown = lastParts[lastParts.length - 1];
+  const streamingText =
+    lastPartShown?.type === "text" && (lastPartShown.text ?? "").length > 0;
+  const llmWorking =
+    status === "submitted" || (status === "streaming" && !lastWorkingTool && !streamingText);
+  const llmWorkingLabel = status === "submitted" ? "Waiting for LLM response…" : "thinking…";
   // A request is in flight; approval buttons must be inert until it settles.
   const busy = status === "streaming" || status === "submitted";
 
@@ -890,14 +937,14 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
             commandOf={commandOf}
           />
         ))}
-        {showThinking && (
+        {llmWorking && (
           <div className="msg assistant">
             <span className="avatar" aria-hidden="true">
               🤖
             </span>
             <div className="bubble">
               <p className="tool working">
-                <span className="spinner" aria-hidden="true" /> thinking…
+                <span className="spinner" aria-hidden="true" /> {llmWorkingLabel}
               </p>
             </div>
           </div>
@@ -943,7 +990,7 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
           rows={1}
           placeholder='Try: "why is payments crashing?" — Shift+Enter for a new line'
         />
-        <button type="submit" disabled={status === "streaming"}>
+        <button type="submit" disabled={status === "streaming" || status === "submitted"}>
           Send
         </button>
         {status === "streaming" && (

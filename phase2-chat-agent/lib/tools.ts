@@ -11,17 +11,68 @@ const useRealCluster = process.env.USE_REAL_CLUSTER !== "false";
 const KUBECTL_BIN = process.env.KUBECTL_BIN || "kubectl";
 const KUBE_CONTEXT = process.env.KUBE_CONTEXT || "";
 
-function kubectl(args: string[]): Promise<string> {
-  const full = KUBE_CONTEXT ? ["--context", KUBE_CONTEXT, ...args] : args;
-  return exec(KUBECTL_BIN, full, { timeout: 300_000 }).then(
-    (r) => r.stdout,
-    (err: { stderr?: string | Buffer; stdout?: string | Buffer; message?: string }) => {
-      const detail = String(err?.stderr || err?.stdout || err?.message || err)
-        .toString()
-        .trim();
-      throw new Error(`kubectl ${full.join(" ")} failed: ${detail || "unknown error"}`);
-    },
+// A read on a healthy cluster returns in well under a second; a hung API server
+// or a wedged watch must not silently block the whole turn. The old 5-minute
+// ceiling made a "simple command" look frozen. Override with KUBECTL_TIMEOUT_MS.
+const KUBECTL_TIMEOUT_MS = Number(process.env.KUBECTL_TIMEOUT_MS ?? 30_000);
+// Transient *connection* failures (API server not up yet, dropped socket) are
+// safe to retry once, so a flaky moment doesn't surface as a tool error.
+const KUBECTL_RETRIES = Number(process.env.KUBECTL_RETRIES ?? 1);
+
+type ExecError = {
+  stderr?: string | Buffer;
+  stdout?: string | Buffer;
+  message?: string;
+  killed?: boolean;
+  signal?: string;
+};
+
+// Worth retrying: the command never reached the server / the socket died. A
+// timeout is deliberately NOT retried (retrying would just double the wait).
+function isTransient(detail: string): boolean {
+  return /ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|connection refused|TLS handshake|no route to host|socket hang up|i\/o timeout/i.test(
+    detail,
   );
+}
+
+async function kubectlOnce(args: string[], timeoutMs: number): Promise<string> {
+  const full = KUBE_CONTEXT ? ["--context", KUBE_CONTEXT, ...args] : args;
+  const started = Date.now();
+  try {
+    const r = await exec(KUBECTL_BIN, full, { timeout: timeoutMs });
+    console.log(`[ops-chat] kubectl ${full.join(" ")} ok (${Date.now() - started}ms)`);
+    return r.stdout;
+  } catch (raw) {
+    const err = raw as ExecError;
+    const detail = String(err?.stderr || err?.stdout || err?.message || err).toString().trim();
+    const elapsed = Date.now() - started;
+    const timedOut = err?.killed === true || err?.signal === "SIGTERM" || /timed out|timeout/i.test(detail);
+    const why = timedOut ? `timed out after ${timeoutMs}ms` : "failed";
+    console.error(`[ops-chat] kubectl ${full.join(" ")} ${why} (${elapsed}ms): ${detail}`);
+    throw Object.assign(
+      new Error(`kubectl ${full.join(" ")} ${why}: ${detail || "unknown error"}`),
+      { transient: isTransient(detail) },
+    );
+  }
+}
+
+async function kubectl(
+  args: string[],
+  opts: { timeoutMs?: number; retries?: number } = {},
+): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? KUBECTL_TIMEOUT_MS;
+  const retries = opts.retries ?? KUBECTL_RETRIES;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await kubectlOnce(args, timeoutMs);
+    } catch (e) {
+      lastError = e;
+      if (attempt === retries || !(e as { transient?: boolean }).transient) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+  throw lastError;
 }
 
 // Mock data for demo mode
@@ -295,12 +346,18 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
       if (!useRealCluster) return `${workload} memory set to ${memory} (mock)`;
       if (kind === "deployment" || kind === "statefulset" || kind === "daemonset") {
         const patched = await kubectl(kubectlArgs("setMemoryLimit", { workload, kind, namespace, memory }));
-        try {
-          const rolled = await kubectl(["rollout", "status", `${kind}/${workload}`, "-n", namespace, "--timeout=180s"]);
-          return `${patched.trim()}\n${rolled.trim()}`;
-        } catch (e) {
-          return patched.trim();
-        }
+        // Deliberately do NOT wait on `kubectl rollout status` here. On a
+        // workload that is still crash-looping (e.g. an OOMKilled MySQL pod)
+        // the rollout never becomes ready, so the previous `--timeout=180s`
+        // blocked the tool — and the whole conversation — for 3 minutes on
+        // every attempt. The patch is already accepted by the API server; the
+        // rollout proceeds in the background. Callers can verify with
+        // getPods/getStatefulSets when they want confirmation.
+        return (
+          `${patched.trim()}\n` +
+          `Memory limit for ${kind}/${workload} set to ${memory}. Rollout is continuing in the background; ` +
+          `not waiting for it to finish.`
+        );
       }
       return kubectl(["patch", kind, workload, "-n", namespace, "--type=strategic", "-p", JSON.stringify({ spec: { template: { spec: { containers: [{ resources: { limits: { memory }, requests: { memory } } }] } } } })]);
     },
@@ -399,5 +456,3 @@ export function createClusterTools(requireApproval: ApprovalChecker) {
   }),
   };
 }
-
-export const MAX_STEPS = Number(process.env.AGENT_MAX_STEPS ?? 30);
