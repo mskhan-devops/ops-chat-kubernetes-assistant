@@ -30,10 +30,10 @@ export function createChatModel(config?: {
   model?: string;
   name?: string;
 }) {
-  const baseURL = config?.baseUrl ?? DEFAULT_LLM_BASE_URL;
-  const apiKey = config?.apiKey ?? DEFAULT_LLM_API_KEY;
-  const model = config?.model ?? DEFAULT_LLM_MODEL;
-  const name = config?.name ?? DEFAULT_LLM_PROVIDER_NAME;
+  const baseURL = config?.baseUrl && config.baseUrl.trim() ? config.baseUrl.trim() : DEFAULT_LLM_BASE_URL;
+  const apiKey = config?.apiKey && config.apiKey.trim() ? config.apiKey.trim() : DEFAULT_LLM_API_KEY;
+  const model = config?.model && config.model.trim() ? config.model.trim() : DEFAULT_LLM_MODEL;
+  const name = config?.name && config.name.trim() ? config.name.trim() : DEFAULT_LLM_PROVIDER_NAME;
 
   const provider = createOpenAI({
     name,
