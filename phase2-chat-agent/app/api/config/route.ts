@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
-import {
-  DEFAULT_LLM_BASE_URL,
-  DEFAULT_LLM_MODEL,
-  DEFAULT_LLM_API_KEY,
-} from "@/lib/model";
 
 export async function GET() {
+  const baseUrl =
+    process.env.LLM_BASE_URL ||
+    process.env.LM_STUDIO_BASE_URL ||
+    "";
+  const model =
+    process.env.LLM_MODEL ||
+    process.env.LM_STUDIO_MODEL ||
+    "";
+  const apiKey = process.env.LLM_API_KEY || process.env.LM_STUDIO_API_KEY || "";
   return NextResponse.json({
-    baseUrl: DEFAULT_LLM_BASE_URL,
-    model: DEFAULT_LLM_MODEL,
-    apiKeySet: !!DEFAULT_LLM_API_KEY && DEFAULT_LLM_API_KEY !== "lm-studio",
+    baseUrl,
+    model,
+    apiKey,
+    apiKeySet: !!apiKey,
   });
 }
