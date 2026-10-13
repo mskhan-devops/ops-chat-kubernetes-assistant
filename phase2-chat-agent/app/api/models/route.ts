@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (apiKey && apiKey.trim()) {
-      headers.Authorization = `Bearer ${apiKey.trim()}`;
+      headers["Authorization"] = "Bearer " + apiKey.trim();
     }
 
     const res = await fetch(url, { headers });
