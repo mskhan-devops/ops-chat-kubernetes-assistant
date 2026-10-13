@@ -626,6 +626,24 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
   // the UIMessage itself carries no clock.
   const [timestamps, setTimestamps] = useState<Record<string, number>>({});
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({ baseUrl: "", apiKey: "", model: "local-model" });
+
+  // Sync the LLM config from the server (env vars) on mount so the "current
+  // model" badge and outbound requests reflect the configured provider without
+  // requiring the user to press Apply first.
+  useEffect(() => {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((cfg) => {
+        if (cfg.baseUrl || cfg.model) {
+          setLlmConfig((prev) => ({
+            baseUrl: cfg.baseUrl ?? prev.baseUrl,
+            apiKey: cfg.apiKey ?? prev.apiKey,
+            model: cfg.model ?? prev.model,
+          }));
+        }
+      })
+      .catch(() => {});
+  }, []);
   // Global open/closed state for every ToolActivity strip.
   const [activityOpen, setActivityOpen] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
