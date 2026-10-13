@@ -434,11 +434,19 @@ function ApprovalCard({
     );
   }
 
-  const approved =
-    part.state === "output-available" && (part.output as { approved?: boolean })?.approved;
+  const output = part.state === "output-available"
+    ? ((part.output ?? {}) as { approved?: boolean; cancelled?: boolean })
+    : {};
+  const cancelled = output.cancelled === true;
+  const approved = !cancelled && output.approved === true;
   return (
-    <div className={`approval-result ${approved ? "ok" : "no"}`}>
-      {approved ? "✅ Approved" : "❌ Denied"} · {approvalSummary(toolName, input)}
+    <div className={`approval-result ${approved ? "ok" : cancelled ? "neutral" : "no"}`}>
+      {approved
+        ? "✅ Approved"
+        : cancelled
+          ? "🔁 Redirected"
+          : "❌ Denied"}{" "}
+      · {approvalSummary(toolName, input)}
     </div>
   );
 }
@@ -647,6 +655,10 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
         const p = part as AnyPart;
         if (!p.type?.startsWith("tool-propose")) continue;
         if (p.state !== "output-available") continue;
+        // A "cancelled" proposal (via Something else on mind?) is neutral — it
+        // must not be remembered as a denial, so the same change can be
+        // proposed and approved again later.
+        if ((p.output as { cancelled?: boolean } | undefined)?.cancelled === true) continue;
         if ((p.output as { approved?: boolean } | undefined)?.approved !== false) continue;
         const toolName = toolNameOf(p);
         for (const key of objectiveKeys(toolName, (p.input ?? {}) as Record<string, unknown>)) {
@@ -704,10 +716,11 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
   };
 
   // "Something else on mind?": the user doesn't approve/deny but wants to steer
-  // the agent with their own words. We mark the pending proposal as denied (so
-  // nothing executes and it won't be re-offered) and hand the human's text over
-  // as a normal user message. The auto-resend is suppressed for the denial so
-  // it doesn't race the user message.
+  // the agent with their own words. We resolve the pending proposal as
+  // CANCELLED (a neutral, non-decision outcome) so nothing executes, the change
+  // is not recorded as denied, and the agent can re-propose it later if asked.
+  // The human's text then goes out as a normal user message. The auto-resend is
+  // suppressed for the cancellation so it doesn't race the user message.
   const resolveOther = async (part: AnyPart, text: string) => {
     if (!part.toolCallId || !text.trim()) return;
     suppressAutoSendRef.current = true;
@@ -715,7 +728,7 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
       await addToolOutput({
         tool: toolNameOf(part),
         toolCallId: part.toolCallId,
-        output: { approved: false },
+        output: { cancelled: true },
       });
       cancelRetry();
       await sendMessage({ text });

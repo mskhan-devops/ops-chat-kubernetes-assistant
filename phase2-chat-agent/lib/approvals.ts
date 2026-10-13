@@ -117,7 +117,13 @@ export function createApprovalChecker(messages: UIMessage[]): ApprovalChecker {
         if (p.state !== "output-available") continue;
         const toolName = p.type.slice("tool-".length);
         const input = (p.input ?? {}) as Record<string, unknown>;
-        const approved = (p.output as { approved?: boolean } | undefined)?.approved === true;
+        const output = p.output as { approved?: boolean; cancelled?: boolean } | undefined;
+        // "Something else on mind?" resolves a proposal as cancelled — a
+        // neutral "no decision", not an approval and NOT a denial. Skip it
+        // entirely: it grants nothing, it poisons nothing, and a fresh proposal
+        // for the same change can still be approved normally.
+        if (output?.cancelled === true) continue;
+        const approved = output?.approved === true;
         if (!approved) {
           for (const key of objectiveKeys(toolName, input)) deniedKeys.add(key);
         }
