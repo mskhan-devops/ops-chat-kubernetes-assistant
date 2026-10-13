@@ -30,7 +30,16 @@ export function createChatModel(config?: {
   model?: string;
   name?: string;
 }) {
-  const baseURL = config?.baseUrl && config.baseUrl.trim() ? config.baseUrl.trim() : DEFAULT_LLM_BASE_URL;
+  let baseURL = DEFAULT_LLM_BASE_URL;
+  const rawBase = config?.baseUrl?.trim();
+  if (rawBase) {
+    try {
+      new URL(rawBase);
+      baseURL = rawBase;
+    } catch {
+      baseURL = DEFAULT_LLM_BASE_URL;
+    }
+  }
   const apiKey = config?.apiKey && config.apiKey.trim() ? config.apiKey.trim() : DEFAULT_LLM_API_KEY;
   const model = config?.model && config.model.trim() ? config.model.trim() : DEFAULT_LLM_MODEL;
   const name = config?.name && config.name.trim() ? config.name.trim() : DEFAULT_LLM_PROVIDER_NAME;
