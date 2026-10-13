@@ -28,6 +28,7 @@ import {
 } from "ai";
 import { objectiveKeys } from "@/lib/objectives";
 import { formatCommand } from "@/lib/kubectl-args";
+import { LLMSelector, type LLMConfig } from "./llm-selector";
 
 type AnyPart = {
   type?: string;
@@ -579,7 +580,15 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
 
   const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError, regenerate } =
     useChat({
-      transport: new DefaultChatTransport({ api: "/api/chat" }),
+      transport: new DefaultChatTransport({
+        api: "/api/chat",
+        prepareSendMessagesRequest: ({ messages }) => ({
+          body: {
+            messages,
+            config: llmConfig,
+          },
+        }),
+      }),
       // once the human answers a propose tool call, re-send so the agent picks up
       // the decision and continues the turn
       sendAutomaticallyWhen: (options) => {
@@ -616,6 +625,7 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
   // Timestamps are stamped client-side the first time a message id appears;
   // the UIMessage itself carries no clock.
   const [timestamps, setTimestamps] = useState<Record<string, number>>({});
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ baseUrl: "", apiKey: "", model: "local-model" });
   // Global open/closed state for every ToolActivity strip.
   const [activityOpen, setActivityOpen] = useState(false);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -908,6 +918,7 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     <div className="chat" ref={chatRef}>
       <div className="chat-resize" role="separator" aria-orientation="vertical"
         aria-label="Resize chat width" onPointerDown={startResize} />
+      <LLMSelector value={llmConfig} onChange={setLlmConfig} />
       {hasActivity && (
         <div className="chat-toolbar">
           <button
