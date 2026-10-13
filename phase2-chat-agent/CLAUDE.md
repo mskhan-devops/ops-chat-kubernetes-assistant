@@ -1,20 +1,20 @@
 # CLAUDE.md
 
 Local Ops Chat — an AI Kubernetes incident assistant that runs entirely on this
-machine. No Trigger.dev, no cloud. LLM inference comes from LM Studio
-(`http://localhost:1234/v1`); cluster actions shell out to `kubectl` against a
-local kind cluster.
+machine. No Trigger.dev, no cloud. LLM inference comes from any OpenAI-compatible
+provider (LM Studio, OpenRouter, Groq, etc.); cluster actions shell out to `kubectl`
+against a local kind cluster.
 
 ## Layout
 - `app/api/chat/route.ts` — the agent loop: `streamText` + `clusterTools` + HITL.
-- `lib/model.ts` — LM Studio OpenAI-compatible provider (env-driven).
+- `lib/model.ts` — Generic OpenAI-compatible provider (env-driven).
 - `lib/tools.ts` — read-only + HITL-gated kubectl tools.
 - `lib/agent.ts` — system prompt + max steps.
 - `app/components/chat.tsx` — `useChat` + `DefaultChatTransport`, approval cards.
 
 ## Run / verify
 ```bash
-cp .env.example .env.local          # set LM_STUDIO_MODEL + KUBE_CONTEXT
+cp .env.example .env.local          # set LLM_MODEL/LM_STUDIO_MODEL + KUBE_CONTEXT
 npm install
 npm run typecheck                   # must pass
 npm run build                       # must pass

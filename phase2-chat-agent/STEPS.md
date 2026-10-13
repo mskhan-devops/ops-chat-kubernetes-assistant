@@ -10,7 +10,7 @@ provides inference locally.
 |---|---|
 | Chat UI + approval cards | `app/components/chat.tsx`, `app/page.tsx` |
 | Agent endpoint (LLM loop) | `app/api/chat/route.ts` |
-| LM Studio provider | `lib/model.ts` |
+| LLM provider (OpenAI-compatible) | `lib/model.ts` |
 | kubectl tools + HITL gates | `lib/tools.ts` |
 | System prompt / step cap | `lib/agent.ts` |
 

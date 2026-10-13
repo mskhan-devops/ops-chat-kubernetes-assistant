@@ -1,27 +1,44 @@
-// Local LLM provider — LM Studio's OpenAI-compatible server.
+// Generic OpenAI-compatible LLM provider.
+// 
+// Supports any OpenAI-compatible API endpoint (LM Studio, OpenRouter, Groq,
+// Together, Fireworks, etc.). Configured via environment variables with
+// backward compatibility for LM Studio-specific names.
 //
-// LM Studio serves an OpenAI-compatible API at http://localhost:1234/v1 by
-// default, so we reuse the official OpenAI provider and just point its baseURL
-// at it. `.chat()` forces the stateless Chat Completions endpoint.
-//
-// Everything is driven by environment variables (see .env.example):
-//   LM_STUDIO_BASE_URL, LM_STUDIO_API_KEY, LM_STUDIO_MODEL
-//
-// Docs: https://lmstudio.ai/docs/app/api/endpoints/openai
+// Environment variables (see .env.example):
+//   LLM_BASE_URL or LM_STUDIO_BASE_URL (default: http://localhost:1234/v1)
+//   LLM_API_KEY or LM_STUDIO_API_KEY (default: lm-studio)
+//   LLM_MODEL or LM_STUDIO_MODEL (default: local-model)
+//   LLM_PROVIDER_NAME (optional, default: "openai-compatible")
 
 import { createOpenAI } from "@ai-sdk/openai";
 
-export const LM_STUDIO_BASE_URL =
-  process.env.LM_STUDIO_BASE_URL ?? "http://localhost:1234/v1";
+export const LLM_BASE_URL =
+  process.env.LLM_BASE_URL ??
+  process.env.LM_STUDIO_BASE_URL ??
+  "http://localhost:1234/v1";
 
-export const LM_STUDIO_MODEL = process.env.LM_STUDIO_MODEL ?? "local-model";
+export const LLM_MODEL =
+  process.env.LLM_MODEL ??
+  process.env.LM_STUDIO_MODEL ??
+  "local-model";
 
-export const lmStudio = createOpenAI({
-  name: "lm-studio",
-  baseURL: LM_STUDIO_BASE_URL,
-  // LM Studio ignores the key, but the OpenAI client requires one to be set.
-  apiKey: process.env.LM_STUDIO_API_KEY ?? "lm-studio",
+export const LLM_API_KEY =
+  process.env.LLM_API_KEY ??
+  process.env.LM_STUDIO_API_KEY ??
+  "lm-studio";
+
+export const LLM_PROVIDER_NAME = process.env.LLM_PROVIDER_NAME ?? "openai-compatible";
+
+export const openaiCompatible = createOpenAI({
+  name: LLM_PROVIDER_NAME,
+  baseURL: LLM_BASE_URL,
+  apiKey: LLM_API_KEY,
 });
 
+// For backward compatibility with existing code
+export const LM_STUDIO_BASE_URL = LLM_BASE_URL;
+export const LM_STUDIO_MODEL = LLM_MODEL;
+export const lmStudio = openaiCompatible;
+
 // The chat-completions model handle used by the agent.
-export const chatModel = lmStudio.chat(LM_STUDIO_MODEL);
+export const chatModel = openaiCompatible.chat(LLM_MODEL);
