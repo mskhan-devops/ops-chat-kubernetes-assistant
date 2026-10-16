@@ -257,7 +257,15 @@ function ToolActivity({
   if (parts.length === 0) return null;
 
   const running = parts.some(isRunning);
-  const failed = parts.some((p) => p.state === "output-error");
+  // Split the turn's calls so a single failure no longer paints the whole strip
+  // red: the collapsed toggle reports a pass/fail tally, and the expanded list
+  // groups failures, in-progress calls, and successes separately.
+  const failedParts = parts.filter((p) => p.state === "output-error");
+  const runningParts = parts.filter(isRunning);
+  const passedParts = parts.filter((p) => p.state !== "output-error" && !isRunning(p));
+  const failedCount = failedParts.length;
+  const passedCount = passedParts.length;
+  const mixed = failedCount > 0 && passedCount > 0;
 
   const labels = Array.from(new Set(parts.map((p) => labelFor(toolNameOf(p)))));
   const summary =
@@ -267,7 +275,7 @@ function ToolActivity({
   // Which step is mid-flight right now, in human terms? This is shown on the
   // (possibly collapsed) toggle so the user always sees what the agent is doing
   // during a slow execute (e.g. kubectl rollout waiting), not just a spinner.
-  const active = parts.filter(isRunning);
+  const active = runningParts;
   const activeLabels = Array.from(new Set(active.map((p) => labelFor(toolNameOf(p)))));
   const hasCommand = active.some((p) => commandOf(p));
   const activeStatus = active.every((p) => p.state === "input-streaming")
@@ -289,15 +297,22 @@ function ToolActivity({
         </span>
         {running ? (
           <span className="spinner" aria-hidden="true" />
-        ) : (
-          <span className={`activity-icon${failed ? " fail" : " ok"}`} aria-hidden="true">
-            {failed ? "✕" : "✓"}
+        ) : mixed ? (
+          // A mix of outcomes: the tally makes it clear most steps succeeded,
+          // instead of one red cross that reads as "everything failed".
+          <span className="activity-tally">
+            <span className="activity-badge fail">✕ {failedCount} failed</span>
+            <span className="activity-badge ok">✓ {passedCount} passed</span>
           </span>
+        ) : failedCount > 0 ? (
+          <span className="activity-icon fail" aria-hidden="true">✕</span>
+        ) : (
+          <span className="activity-icon ok" aria-hidden="true">✓</span>
         )}
         <span className="activity-count">
           {parts.length} {parts.length === 1 ? "step" : "steps"}
         </span>
-        <span className="activity-summary">· {summary}</span>
+        {!mixed && <span className="activity-summary">· {summary}</span>}
       </button>
       {running && activeLabels.length > 0 && (
         <div className="activity-now" role="status" aria-live="polite">
@@ -309,11 +324,45 @@ function ToolActivity({
         </div>
       )}
       {open && (
-        <ul className="activity-list">
-          {parts.map((p, i) => (
-            <ToolRow key={i} part={p} command={commandOf(p)} />
-          ))}
-        </ul>
+        <div className="activity-groups">
+          {failedParts.length > 0 && (
+            <div className="activity-group">
+              <div className="activity-group-head fail">
+                <span aria-hidden="true">✕</span> {failedParts.length} failed
+              </div>
+              <ul className="activity-list">
+                {failedParts.map((p, i) => (
+                  <ToolRow key={i} part={p} command={commandOf(p)} />
+                ))}
+              </ul>
+            </div>
+          )}
+          {runningParts.length > 0 && (
+            <div className="activity-group">
+              <div className="activity-group-head running">
+                <span className="activity-item-hint-dot" aria-hidden="true" />{" "}
+                {runningParts.length} in progress
+              </div>
+              <ul className="activity-list">
+                {runningParts.map((p, i) => (
+                  <ToolRow key={i} part={p} command={commandOf(p)} />
+                ))}
+              </ul>
+            </div>
+          )}
+          {passedParts.length > 0 && (
+            <div className="activity-group">
+              <div className="activity-group-head ok">
+                <span aria-hidden="true">✓</span> {passedParts.length} passed
+              </div>
+              <ul className="activity-list">
+                {passedParts.map((p, i) => (
+                  <ToolRow key={i} part={p} command={commandOf(p)} />
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
