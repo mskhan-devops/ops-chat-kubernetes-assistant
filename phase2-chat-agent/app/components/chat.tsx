@@ -577,6 +577,10 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     max: number;
     exhausted: boolean;
   } | null>(null);
+  // Seconds spent waiting on the model for the current gap. Shown next to the
+  // "Waiting for LLM response…" bubble so a slow/unreachable provider visibly
+  // counts up instead of looking frozen.
+  const [waitSeconds, setWaitSeconds] = useState(0);
 
   const { messages, sendMessage, addToolOutput, stop, status, setMessages, error, clearError, regenerate } =
     useChat({
@@ -910,7 +914,27 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
     lastPartShown?.type === "text" && (lastPartShown.text ?? "").length > 0;
   const llmWorking =
     status === "submitted" || (status === "streaming" && !lastWorkingTool && !streamingText);
-  const llmWorkingLabel = status === "submitted" ? "Waiting for LLM response…" : "thinking…";
+  // A ticking clock for the current wait. Reset each time the model starts a
+  // fresh gap, so the count reflects the wait the user is looking at right now.
+  useEffect(() => {
+    if (!llmWorking) {
+      setWaitSeconds(0);
+      return;
+    }
+    const started = Date.now();
+    setWaitSeconds(0);
+    const timer = setInterval(
+      () => setWaitSeconds(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [llmWorking]);
+  const waitSuffix =
+    waitSeconds >= 1
+      ? ` (${waitSeconds} second${waitSeconds === 1 ? "" : "s"} elapsed waiting)`
+      : "";
+  const llmWorkingLabel =
+    (status === "submitted" ? "Waiting for LLM response…" : "thinking…") + waitSuffix;
   // A request is in flight; approval buttons must be inert until it settles.
   const busy = status === "streaming" || status === "submitted";
 
@@ -975,7 +999,9 @@ export function Chat({ kubeBin = "kubectl", kubeContext = "" }: { kubeBin?: stri
           <span>
             {retryState && !retryState.exhausted
               ? `⚠ ${error.message || "The request failed."} — retrying (${retryState.attempt}/${retryState.max})…`
-              : `⚠ ${error.message || "The request failed."}`}
+              : retryState?.exhausted
+                ? `⚠ Cannot reach the model server — is your LLM provider running and the model configured? (Failed after ${retryState.max} attempts. Last error: ${error.message || "unknown error"})`
+                : `⚠ ${error.message || "The request failed."}`}
           </span>
           <div className="error-banner-actions">
             <button type="button" className="retry-btn" onClick={manualRetry}>
