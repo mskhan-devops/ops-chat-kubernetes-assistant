@@ -25,6 +25,29 @@ main > p { color: #64748b; margin-top: 0; }
 .chat-resize:hover, .chat-resize:focus-visible, .chat:hover .chat-resize { opacity: 1; }
 .chat-resize:hover { background: #cbd5e1; }
 
+/* ── LLM provider panel ──
+   Collapsible config card above the transcript. The header stays put while the
+   body folds away, keeping the active provider + model visible at all times. */
+.llm-panel { margin-bottom: 12px; background: #f9fafb; border: 1px solid #e5e7eb;
+  border-radius: 10px; overflow: hidden; }
+.llm-head { width: 100%; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; background: transparent; border: none; font: inherit;
+  text-align: left; cursor: pointer; color: #0f172a; }
+.llm-head:hover { background: #f1f5f9; }
+.llm-chev { flex: none; color: #94a3b8; font-size: 11px; }
+.llm-title { flex: none; font-weight: 600; font-size: 14px; }
+.llm-current { margin-left: auto; display: flex; align-items: center; gap: 6px;
+  min-width: 0; }
+.llm-provider-badge { flex: none; font-size: 11px; color: #64748b;
+  background: #eef2f7; border: 1px solid #e2e8f0; border-radius: 999px;
+  padding: 2px 9px; white-space: nowrap; }
+.llm-model-badge { font-size: 12px; font-weight: 600; color: #166534;
+  background: #dcfce7; border: 1px solid #bbf7d0; border-radius: 999px;
+  padding: 2px 10px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 260px; }
+.llm-body { padding: 12px; border-top: 1px solid #eef2f7; }
+@media (max-width: 560px) { .llm-provider-badge { display: none; } }
+
 /* Global tool-activity toggle above the transcript */
 .chat-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .ghost-btn { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 999px;

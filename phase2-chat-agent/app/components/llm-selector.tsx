@@ -57,6 +57,7 @@ export function LLMSelector({ value, onChange }: { value: LLMConfig; onChange: (
   const [showKey, setShowKey] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [open, setOpen] = useState(false);
 
   const active = configs[selectedProvider] ?? { baseUrl: "", apiKey: "", model: "" };
   const seededRef = useRef(false);
@@ -157,8 +158,24 @@ export function LLMSelector({ value, onChange }: { value: LLMConfig; onChange: (
   );
 
   return (
-    <div style={{ marginBottom: 12, padding: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 8 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>LLM Provider (current: {value.model})</div>
+    <div className="llm-panel">
+      <button
+        type="button"
+        className="llm-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="llm-chev" aria-hidden="true">{open ? "▾" : "▸"}</span>
+        <span className="llm-title">LLM Provider</span>
+        <span className="llm-current">
+          <span className="llm-provider-badge">{selectedProvider}</span>
+          <span className="llm-model-badge" title={value.model || "no model selected"}>
+            {value.model || "no model selected"}
+          </span>
+        </span>
+      </button>
+      {open && (
+      <div className="llm-body">
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         {PROVIDERS.map((p) => (
           <button key={p.name} type="button" onClick={() => selectProvider(p.name)} style={{ padding: "6px 10px", borderRadius: 6, border: selectedProvider === p.name ? "2px solid #16a34a" : "1px solid #d1d5db", background: selectedProvider === p.name ? "#dcfce7" : "#fff", fontSize: 13, cursor: "pointer" }}>
@@ -232,6 +249,8 @@ export function LLMSelector({ value, onChange }: { value: LLMConfig; onChange: (
             </button>
           </div>
         </div>
+      )}
+      </div>
       )}
     </div>
   );
